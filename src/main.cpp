@@ -16,8 +16,11 @@
 // along with this program; if not, write to the Free Software
 // Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
+#include "Arduino.h"
 #include <U8g2lib.h>
 #include <Wire.h>
+#include <driver/ledc.h>
+#include <soc/ledc_struct.h>
 
 #include "tamalib.h"
 #include "hw.h"
@@ -37,7 +40,12 @@ U8G2_SSD1306_128X64_NONAME_2_HW_I2C display(U8G2_R0);
 #endif
 
 #ifdef U8G2_LAYOUT_ROTATE_180
-U8G2_SSD1306_128X64_NONAME_2_HW_I2C display(U8G2_R2);
+// U8G2_SSD1306_128X64_NONAME_2_HW_I2C display(U8G2_R2);
+#define sc1_oled_scl 18
+#define sc1_oled_sda 17
+#define sc1_oled_rst 21
+//U8G2_SSD1306_128X64_NONAME_2_HW_I2C display(U8G2_R0, /* reset=*/ 21, /* clock=*/ 18, /* data=*/ 17);
+U8G2_SSD1306_128X64_NONAME_F_SW_I2C display(U8G2_R0, /* clock=*/sc1_oled_scl, /* data=*/sc1_oled_sda, /* reset=*/sc1_oled_rst);
 #endif
 
 #ifdef U8G2_LAYOUT_MIRROR
@@ -57,9 +65,9 @@ U8G2_SSD1306_128X64_NONAME_2_HW_I2C display(U8G2_MIRROR);
 #define ENABLE_TAMA_SOUND
 #define ENABLE_TAMA_SOUND_ACTIVE_LOW
 #elif defined(ESP32)
-#define PIN_BTN_L 255
-#define PIN_BTN_M 255
-#define PIN_BTN_R 255
+#define PIN_BTN_L 21
+#define PIN_BTN_M 20
+#define PIN_BTN_R 19
 #define PIN_BUZZER 255
 #else
 #define PIN_BTN_L 2
@@ -166,26 +174,32 @@ static int hal_handler(void)
     if (incomingByte == 49)
     {
       hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
+      Serial.println("Left pressed");
     }
     else if (incomingByte == 50)
     {
       hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
+      Serial.println("Left released");
     }
     else if (incomingByte == 51)
     {
       hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+      Serial.println("Middle pressed");
     }
     else if (incomingByte == 52)
     {
       hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+      Serial.println("Middle released");
     }
     else if (incomingByte == 53)
     {
       hw_set_button(BTN_RIGHT, BTN_STATE_PRESSED);
+      Serial.println("Right pressed");
     }
     else if (incomingByte == 54)
     {
       hw_set_button(BTN_RIGHT, BTN_STATE_RELEASED);
+      Serial.println("Right released");
     }
   }
 #else
@@ -440,6 +454,7 @@ void loop()
     if (millis() - right_long_press_started > AUTO_SAVE_MINUTES * 1000) 
     {
       eraseStateFromEEPROM();
+      Serial.println("Erased EEPROM, restarting...");
       #if defined(ESP8266) || defined(ESP32)
       ESP.restart();
       #endif
