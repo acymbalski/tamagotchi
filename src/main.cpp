@@ -16,7 +16,6 @@
 // along with this program; if not, write to the Free Software
 // Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-#include "Arduino.h"
 #include <U8g2lib.h>
 #include <Wire.h>
 #include <driver/ledc.h>
@@ -420,7 +419,10 @@ void setup()
   tamalib_set_framerate(TAMA_DISPLAY_FRAMERATE);
   tamalib_init(1000000);
 
+
+#ifdef ENABLE_AUTO_SAVE_STATUS || ENABLE_LOAD_STATE_FROM_EEPROM
   initEEPROM();
+#endif
 
 #ifdef ENABLE_LOAD_STATE_FROM_EEPROM
   if (validEEPROM())
