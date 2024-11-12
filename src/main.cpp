@@ -40,11 +40,11 @@ U8G2_SSD1306_128X64_NONAME_2_HW_I2C display(U8G2_R0);
 
 #ifdef U8G2_LAYOUT_ROTATE_180
 // U8G2_SSD1306_128X64_NONAME_2_HW_I2C display(U8G2_R2);
-#define sc1_oled_scl 18
-#define sc1_oled_sda 17
+#define sc1_oled_scl 22//18
+#define sc1_oled_sda 21//17
 #define sc1_oled_rst 21
 //U8G2_SSD1306_128X64_NONAME_2_HW_I2C display(U8G2_R0, /* reset=*/ 21, /* clock=*/ 18, /* data=*/ 17);
-U8G2_SSD1306_128X64_NONAME_F_SW_I2C display(U8G2_R0, /* clock=*/sc1_oled_scl, /* data=*/sc1_oled_sda, /* reset=*/sc1_oled_rst);
+U8G2_SSD1306_128X64_NONAME_F_SW_I2C display(U8G2_R0, /* clock=*/sc1_oled_scl, /* data=*/sc1_oled_sda);//, /* reset=*/sc1_oled_rst);
 #endif
 
 #ifdef U8G2_LAYOUT_MIRROR
@@ -64,10 +64,10 @@ U8G2_SSD1306_128X64_NONAME_2_HW_I2C display(U8G2_MIRROR);
 #define ENABLE_TAMA_SOUND
 #define ENABLE_TAMA_SOUND_ACTIVE_LOW
 #elif defined(ESP32)
-#define PIN_BTN_L 21
-#define PIN_BTN_M 20
-#define PIN_BTN_R 19
-#define PIN_BUZZER 255
+#define PIN_BTN_L 26//5
+#define PIN_BTN_M 25//6
+#define PIN_BTN_R 33//7
+#define PIN_BUZZER 32
 #else
 #define PIN_BTN_L 2
 #define PIN_BTN_M 3
@@ -88,7 +88,7 @@ static unsigned long lastSaveTimestamp = 0;
 
 static void hal_halt(void)
 {
-  // Serial.println("Halt!");
+  Serial.println("Halt!");
 }
 
 static void hal_log(log_level_t level, char *buff, ...)
@@ -117,6 +117,9 @@ static void hal_update_screen(void)
 
 static void hal_set_lcd_matrix(u8_t x, u8_t y, bool_t val)
 {
+  Serial.println("hslm: (" + x);
+  Serial.println(", " + y);
+  Serial.println("): " + val);
   uint8_t mask;
   if (val)
   {
@@ -204,26 +207,33 @@ static int hal_handler(void)
 #else
   if (digitalRead(PIN_BTN_L) == HIGH)
   {
+    Serial.println("Left button pressed.");
     hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
   }
   else
   {
+    Serial.println("Left button released.");
     hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
   }
   if (digitalRead(PIN_BTN_M) == HIGH)
   {
+    Serial.println("Middle button pressed.");
     hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
   }
   else
   {
+    Serial.println("Middle button released.");
     hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
   }
   if (digitalRead(PIN_BTN_R) == HIGH)
   {
+    Serial.println("Right button pressed.");
     hw_set_button(BTN_RIGHT, BTN_STATE_PRESSED);
   }
   else
   {
+    
+    Serial.println("Right button released.");
     hw_set_button(BTN_RIGHT, BTN_STATE_RELEASED);
   }
 // #ifdef ENABLE_AUTO_SAVE_STATUS
@@ -279,6 +289,7 @@ void drawTamaRow(uint8_t tamaLCD_y, uint8_t ActualLCD_y, uint8_t thick)
   }
 }
 
+// Draw icons on screen
 void drawTamaSelection(uint8_t y)
 {
   uint8_t i;
@@ -300,40 +311,60 @@ void displayTama()
   uint8_t j;
   display.firstPage();
 #ifdef U8G2_LAYOUT_ROTATE_180
+
   drawTamaSelection(49);
   display.nextPage();
 
-  for (j = 11; j < LCD_HEIGHT; j++)
+  for (j = 0; j < LCD_HEIGHT; j++)
   {
-    drawTamaRow(j, j + j + j, 2);
-  }
-  display.nextPage();
-
-  for (j = 5; j <= 10; j++)
-  {
+    if (j != 5)
+      drawTamaRow(j, j * 3, 2);
     if (j == 5)
     {
-      drawTamaRow(j, j + j + j + 1, 1);
+      drawTamaRow(j, j * 3, 1);
+      display.nextPage();
+      drawTamaRow(j, j * 3 + 1, 1);
     }
-    else
-    {
-      drawTamaRow(j, j + j + j, 2);
-    }
+    if (j == 10)
+      display.nextPage();
   }
-  display.nextPage();
 
-  for (j = 0; j <= 5; j++)
-  {
-    if (j == 5)
-    {
-      drawTamaRow(j, j + j + j, 1);
-    }
-    else
-    {
-      drawTamaRow(j, j + j + j, 2);
-    }
-  }
-  display.nextPage();
+  // TODO: Once we get it all working hopefully remove the below
+  //uint8_t thickness = 2;
+  // // draw icons (?)
+  // for (j = 11; j < LCD_HEIGHT; j++)
+  // {
+  //   drawTamaRow(j, j * 3, thickness);
+  // }
+  // //display.nextPage();
+
+  // for (j = 5; j <= 10; j++)
+  // {
+  //   if (j == 5)
+  //   {
+  //     drawTamaRow(j, j * 3 + 1, 1);
+  //   }
+  //   else
+  //   {
+  //     drawTamaRow(j, j * 3, 2);
+  //   }
+  // }
+  // //display.nextPage();
+
+  // for (j = 0; j <= 5; j++)
+  // {
+  //   if (j == 5)
+  //   {
+  //     thickness = 1;
+  //   }
+  //   else
+  //   {
+  //     thickness = 2;
+  //   }
+  //   drawTamaRow(j, j * 3, thickness);
+  
+  // }
+  //display.nextPage();
 #else
   for (j = 0; j < LCD_HEIGHT; j++)
   {
@@ -407,7 +438,6 @@ uint8_t reverseBits(uint8_t num)
 void setup()
 {
   Serial.begin(SERIAL_BAUD);
-
   pinMode(PIN_BTN_L, INPUT);
   pinMode(PIN_BTN_M, INPUT);
   pinMode(PIN_BTN_R, INPUT);
@@ -420,7 +450,7 @@ void setup()
   tamalib_init(1000000);
 
 
-#ifdef ENABLE_AUTO_SAVE_STATUS || ENABLE_LOAD_STATE_FROM_EEPROM
+#ifdef ENABLE_AUTO_SAVE_STATUS
   initEEPROM();
 #endif
 
