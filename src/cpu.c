@@ -20,13 +20,13 @@
 #if defined(ESP8266) || defined(ESP32)
 #include <pgmspace.h>
 #else
-#include <avr/pgmspace.h>
+ #include <avr/pgmspace.h>
 #endif
 #include "cpu.h"
 #include "hw.h"
 #include "hal.h"
+//#include "rom_new.h"
 #include "rom_12bit.h"
-
 
 #define CPU_SPEED_RATIO      0
 #define TICK_FREQUENCY        32768 // Hz
@@ -839,7 +839,7 @@ static void op_retd_cb(u8_t arg0, u8_t arg1)
   sp = (sp + 3) & 0xFF;
   SET_M(x, arg0 & 0xF);
   SET_M(x + 1, (arg0 >> 4) & 0xF);
-  x = ((x + 2) & 0xFF) | (XP << 8);
+  x = (x + 2) & 0xFFF;
   call_depth--;
 }
 
@@ -858,12 +858,12 @@ static void op_halt_cb(u8_t arg0, u8_t arg1)
 
 static void op_inc_x_cb(u8_t arg0, u8_t arg1)
 {
-  x = ((x + 1) & 0xFF) | (XP << 8);
+  x = (x + 1) & 0xFFF;
 }
 
 static void op_inc_y_cb(u8_t arg0, u8_t arg1)
 {
-  y = ((y + 1) & 0xFF) | (YP << 8);
+  y = (y + 1) & 0xFFF;
 }
 
 static void op_ld_x_cb(u8_t arg0, u8_t arg1)
@@ -1033,32 +1033,32 @@ static void op_ld_mn_b_cb(u8_t arg0, u8_t arg1)
 static void op_ldpx_mx_cb(u8_t arg0, u8_t arg1)
 {
   SET_M(x, arg0);
-  x = ((x + 1) & 0xFF) | (XP << 8);
+  x = (x + 1) & 0xFFF;
 }
 
 static void op_ldpx_r_cb(u8_t arg0, u8_t arg1)
 {
   SET_RQ(arg0, RQ(arg1));
-  x = ((x + 1) & 0xFF) | (XP << 8);
+  x = (x + 1) & 0xFFF;
 }
 
 static void op_ldpy_my_cb(u8_t arg0, u8_t arg1)
 {
   SET_M(y, arg0);
-  y = ((y + 1) & 0xFF) | (YP << 8);
+  y = (y + 1) & 0xFFF;
 }
 
 static void op_ldpy_r_cb(u8_t arg0, u8_t arg1)
 {
   SET_RQ(arg0, RQ(arg1));
-  y = ((y + 1) & 0xFF) | (YP << 8);
+  y = (y + 1) & 0xFFF;
 }
 
 static void op_lbpx_cb(u8_t arg0, u8_t arg1)
 {
   SET_M(x, arg0 & 0xF);
   SET_M(x + 1, (arg0 >> 4) & 0xF);
-  x = ((x + 2) & 0xFF) | (XP << 8);
+  x = (x + 2) & 0xFFF;
 }
 
 static void op_set_cb(u8_t arg0, u8_t arg1)
@@ -1487,7 +1487,7 @@ static void op_acpx_cb(u8_t arg0, u8_t arg1)
     if (tmp >> 4) { SET_C(); } else { CLEAR_C(); }
   }
   if (!M(x)) { SET_Z(); } else { CLEAR_Z(); }
-  x = ((x + 1) & 0xFF) | (XP << 8);
+  x = (x + 1) & 0xFFF;
 }
 
 static void op_acpy_cb(u8_t arg0, u8_t arg1)
@@ -1508,7 +1508,7 @@ static void op_acpy_cb(u8_t arg0, u8_t arg1)
     if (tmp >> 4) { SET_C(); } else { CLEAR_C(); }
   }
   if (!M(y)) { SET_Z(); } else { CLEAR_Z(); }
-  y = ((y + 1) & 0xFF) | (YP << 8);
+  y = (y + 1) & 0xFFF;
 }
 
 static void op_scpx_cb(u8_t arg0, u8_t arg1)
@@ -1527,7 +1527,7 @@ static void op_scpx_cb(u8_t arg0, u8_t arg1)
   }
   if (tmp >> 4) { SET_C(); } else { CLEAR_C(); }
   if (!M(x)) { SET_Z(); } else { CLEAR_Z(); }
-  x = ((x + 1) & 0xFF) | (XP << 8);
+  x = (x + 1) & 0xFFF;
 }
 
 static void op_scpy_cb(u8_t arg0, u8_t arg1)
@@ -1546,7 +1546,7 @@ static void op_scpy_cb(u8_t arg0, u8_t arg1)
   }
   if (tmp >> 4) { SET_C(); } else { CLEAR_C(); }
   if (!M(y)) { SET_Z(); } else { CLEAR_Z(); }
-  y = ((y + 1) & 0xFF) | (YP << 8);
+  y = (y + 1) & 0xFFF;
 }
 
 static void op_not_cb(u8_t arg0, u8_t arg1)

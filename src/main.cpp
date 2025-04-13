@@ -18,8 +18,11 @@
 
 #include <U8g2lib.h>
 #include <Wire.h>
+
+#ifndef UNO
 #include <driver/ledc.h>
 #include <soc/ledc_struct.h>
+#endif
 
 #include "tamalib.h"
 #include "hw.h"
@@ -68,6 +71,11 @@ U8G2_SSD1306_128X64_NONAME_2_HW_I2C display(U8G2_MIRROR);
 #define PIN_BTN_M 25//6
 #define PIN_BTN_R 33//7
 #define PIN_BUZZER 32
+#elif defined(UNO)
+#define PIN_BTN_L 2
+#define PIN_BTN_M 3
+#define PIN_BTN_R 4
+#define PIN_BUZZER 9
 #else
 #define PIN_BTN_L 2
 #define PIN_BTN_M 3
@@ -280,11 +288,29 @@ void drawTamaRow(uint8_t tamaLCD_y, uint8_t ActualLCD_y, uint8_t thick)
   uint8_t i;
   for (i = 0; i < LCD_WIDTH; i++)
   {
-    uint8_t mask = 0b10000000;
-    mask = mask >> (i % 8);
+    uint8_t mask = 0b10000000 >> (i % 8);
     if ((matrix_buffer[tamaLCD_y][i / 8] & mask) != 0)
     {
+      Serial.print("Drawing box at x: ");
+      Serial.print(i + i + i + 16);
+      Serial.print(", y: ");
+      Serial.print(ActualLCD_y);
+      Serial.print(", thickness: ");
+      Serial.println(thick);
       display.drawBox(i + i + i + 16, ActualLCD_y, 2, thick);
+    }
+    else
+    {
+      // Serial.print("tamaLCD_y: ");
+      // Serial.print(tamaLCD_y);
+      // Serial.print(", i: ");
+      // Serial.print(i);
+      // Serial.print(", mask: ");
+      // Serial.print(mask, BIN);
+      // Serial.print(", matrix_buffer[tamaLCD_y][i / 8]: ");
+      // Serial.print(matrix_buffer[tamaLCD_y][i / 8], BIN);
+      // Serial.print(", matrix_buffer[tamaLCD_y][i / 8] & mask: ");
+      // Serial.println(matrix_buffer[tamaLCD_y][i / 8] & mask, BIN);
     }
   }
 }
@@ -312,7 +338,10 @@ void displayTama()
   display.firstPage();
 #ifdef U8G2_LAYOUT_ROTATE_180
 
+  // output to serial
+  Serial.println("Drawing");
   drawTamaSelection(49);
+  drawTamaRow(1, 1 * 3, 2);
   display.nextPage();
 
   for (j = 0; j < LCD_HEIGHT; j++)

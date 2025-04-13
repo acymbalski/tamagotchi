@@ -148,14 +148,11 @@ void tamalib_mainloop_step_by_step(void)
 {
   timestamp_t ts;
 
-	g_hal->log(LOG_INFO, "step by step");
   if (!g_hal->handler()) {
     //tamalib_step();
 
     if (exec_mode == EXEC_MODE_RUN) {
-		g_hal->log(LOG_INFO, "running");
       if (cpu_step()) {
-		g_hal->log(LOG_INFO, "paused");
         exec_mode = EXEC_MODE_PAUSE;
         step_depth = cpu_get_depth();
       }
@@ -168,7 +165,6 @@ void tamalib_mainloop_step_by_step(void)
     if (ts - screen_ts >= ts_freq/g_framerate) {
     //if (ts - screen_ts >= ts_freq/DEFAULT_FRAMERATE) {
       screen_ts = ts;
-	  g_hal->log(LOG_INFO, "Updating screen");
       g_hal->update_screen();
     }
   }
