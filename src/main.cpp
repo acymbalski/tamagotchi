@@ -61,8 +61,8 @@ U8G2_SSD1306_128X64_NONAME_2_HW_I2C display(U8G2_R2);
 U8G2_SSD1306_128X64_NONAME_2_HW_I2C display(U8G2_MIRROR);
 #endif
 
-#define PIN_BTN_L 2
-#define PIN_BTN_M 3
+#define PIN_BTN_L 3
+#define PIN_BTN_M 2
 #define PIN_BTN_R 4
 #define PIN_BUZZER 5
 
@@ -156,8 +156,7 @@ static int hal_handler(void) {
     }
   }
 #else
-  // drewnote: Something is a little off with the button presses... can't get out of the egg
-  // check against the arduino project
+
   if (digitalRead(PIN_BTN_L) == HIGH)
   {
     Serial.println("Left button pressed.");
@@ -168,6 +167,7 @@ static int hal_handler(void) {
     //Serial.println("Left button released.");
     hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
   }
+
   if (digitalRead(PIN_BTN_M) == HIGH)
   {
     Serial.println("Middle button pressed.");
@@ -178,6 +178,7 @@ static int hal_handler(void) {
     //Serial.println("Middle button released.");
     hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
   }
+
   if (digitalRead(PIN_BTN_R) == HIGH)
   {
     Serial.println("Right button pressed.");
@@ -189,6 +190,7 @@ static int hal_handler(void) {
     //Serial.println("Right button released.");
     hw_set_button(BTN_RIGHT, BTN_STATE_RELEASED);
   }
+
   #ifdef ENABLE_AUTO_SAVE_STATUS 
     if (digitalRead(5) == HIGH) {
       if (button4state==0) {
