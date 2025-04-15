@@ -65,6 +65,7 @@ U8G2_SSD1306_128X64_NONAME_2_HW_I2C display(U8G2_MIRROR);
 #define PIN_BTN_M 2
 #define PIN_BTN_R 4
 #define PIN_BUZZER 5
+#define PIN_BTN_SAVE 6
 
 void displayTama();
 void saveStateToEEPROM();
