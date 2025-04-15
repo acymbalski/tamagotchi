@@ -34,7 +34,7 @@
 
 /***** Tama Setting and Features *****/
 #define TAMA_DISPLAY_FRAMERATE 3 // 3 is optimal for Arduino UNO
-#define ENABLE_TAMA_SOUND
+//#define ENABLE_TAMA_SOUND
 #define ENABLE_AUTO_SAVE_STATUS
 #define AUTO_SAVE_MINUTES 60 // Auto save for every hour (to preserve EEPROM lifespan)
 #define ENABLE_LOAD_STATE_FROM_EEPROM
@@ -73,7 +73,6 @@ void saveStateToEEPROM();
 /**** TamaLib Specific Variables ****/
 static uint16_t current_freq = 0;
 static bool_t matrix_buffer[LCD_HEIGHT][LCD_WIDTH / 8] = {{0}};
-static byte runOnceBool = 0;
 static bool_t icon_buffer[ICON_NUM] = {0};
 static cpu_state_t cpuState;
 static unsigned long lastSaveTimestamp = 0;
@@ -81,7 +80,7 @@ static unsigned long lastSaveTimestamp = 0;
 
 static void hal_halt(void)
 {
-  // Serial.println("Halt!");
+  Serial.println("Halt!");
 }
 
 static void hal_log(log_level_t level, char *buff, ...)
@@ -142,11 +141,14 @@ static void hal_play_frequency(bool_t en)
 #ifdef ENABLE_TAMA_SOUND
   if (en)
   {
-    tone(9, current_freq);
+    tone(PIN_BUZZER, current_freq);
   }
   else
   {
-    noTone(9);
+    noTone(PIN_BUZZER);
+    #ifdef ENABLE_TAMA_SOUND_ACTIVE_LOW
+    digitalWrite(PIN_BUZZER, HIGH);
+    #endif
   }
 #endif
 }
@@ -163,33 +165,39 @@ static int hal_handler(void)
     if (incomingByte == 49)
     {
       hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
+      Serial.println("Left pressed");
     }
     else if (incomingByte == 50)
     {
       hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
+      Serial.println("Left released");
     }
     else if (incomingByte == 51)
     {
       hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+      Serial.println("Middle pressed");
     }
     else if (incomingByte == 52)
     {
       hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+      Serial.println("Middle released");
     }
     else if (incomingByte == 53)
     {
       hw_set_button(BTN_RIGHT, BTN_STATE_PRESSED);
+      Serial.println("Right pressed");
     }
     else if (incomingByte == 54)
     {
       hw_set_button(BTN_RIGHT, BTN_STATE_RELEASED);
+      Serial.println("Right released");
     }
   }
 #else
 
   if (digitalRead(PIN_BTN_L) == HIGH)
   {
-    Serial.println("Left button pressed.");
+    //Serial.println("Left button pressed.");
     hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
   }
   else
@@ -199,7 +207,7 @@ static int hal_handler(void)
 
   if (digitalRead(PIN_BTN_M) == HIGH)
   {
-    Serial.println("Middle button pressed.");
+    //Serial.println("Middle button pressed.");
     hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
   }
   else
@@ -209,7 +217,7 @@ static int hal_handler(void)
 
   if (digitalRead(PIN_BTN_R) == HIGH)
   {
-    Serial.println("Right button pressed.");
+    //Serial.println("Right button pressed.");
     hw_set_button(BTN_RIGHT, BTN_STATE_PRESSED);
   }
   else
@@ -218,7 +226,7 @@ static int hal_handler(void)
   }
 
 #ifdef ENABLE_AUTO_SAVE_STATUS
-  if (digitalRead(5) == HIGH)
+  if (digitalRead(PIN_BTN_SAVE) == HIGH)
   {
     if (button4state == 0)
     {
@@ -304,11 +312,11 @@ void displayTama()
   {
     if (j == 5)
     {
-      drawTamaRow(j, j + j + j + 1, 1);
+      drawTamaRow(j, j * 3 + 1, 1);
     }
     else
     {
-      drawTamaRow(j, j + j + j, 2);
+      drawTamaRow(j, j * 3, 2);
     }
   }
   display.nextPage();
@@ -317,11 +325,11 @@ void displayTama()
   {
     if (j == 5)
     {
-      drawTamaRow(j, j + j + j, 1);
+      drawTamaRow(j, j * 3, 1);
     }
     else
     {
-      drawTamaRow(j, j + j + j, 2);
+      drawTamaRow(j, j * 3, 2);
     }
   }
   display.nextPage();
@@ -329,12 +337,12 @@ void displayTama()
   for (j = 0; j < LCD_HEIGHT; j++)
   {
     if (j != 5)
-      drawTamaRow(j, j + j + j, 2);
+      drawTamaRow(j, j * 3, 2);
     if (j == 5)
     {
-      drawTamaRow(j, j + j + j, 1);
+      drawTamaRow(j, j * 3, 1);
       display.nextPage();
-      drawTamaRow(j, j + j + j + 1, 1);
+      drawTamaRow(j, j * 3 + 1, 1);
     }
     if (j == 10)
       display.nextPage();
@@ -480,13 +488,6 @@ void setup()
 #ifdef ENABLE_LOAD_HARCODED_STATE_WHEN_START
   loadHardcodedState();
 #endif
-
-  /*
-    int i;
-    for(i=0;i<(18*8);i++) {
-      bitmaps_raw[i]= reverseBits(bitmaps_raw[i]);
-    }
-  */
 
 #ifdef ENABLE_DUMP_STATE_TO_SERIAL_WHEN_START
   dumpStateToSerial();
