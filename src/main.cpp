@@ -457,7 +457,7 @@ uint8_t reverseBits(uint8_t num)
 
 void setup()
 {
-  Serial.begin(9600);
+  Serial.begin(SERIAL_BAUD);
   pinMode(PIN_BTN_L, INPUT);
   pinMode(PIN_BTN_M, INPUT);
   pinMode(PIN_BTN_R, INPUT);
