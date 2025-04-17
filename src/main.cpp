@@ -1,25 +1,26 @@
-// ArduinoGotchi - A real Tamagotchi emulator for Arduino UNO
-//
-// Copyright (C) 2022 Gary Kwok
-//
-// This program is free software; you can redistribute it and/or
-// modify it under the terms of the GNU General Public License
-// as published by the Free Software Foundation; either version 2
-// of the License, or (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program; if not, write to the Free Software
-// Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+/*
+* ArduinoGotchi - A real Tamagotchi emulator for Arduino ESP32
+*
+* Copyright (C) 2022 Gary Kwok - Arduino Uno Implementation
+* Copyright (C) 2022 Marcel Ochsendorf - ESP32 Plattform Support
+*
+* This program is free software; you can redistribute it and/or
+* modify it under the terms of the GNU General Public License
+* as published by the Free Software Foundation; either version 2
+* of the License, or (at your option) any later version.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with this program; if not, write to the Free Software
+* Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+*/
 
 #include <U8g2lib.h>
 #include <Wire.h>
-#include <driver/ledc.h>
-#include <soc/ledc_struct.h>
 
 #include "tamalib.h"
 #include "hw.h"
@@ -28,10 +29,14 @@
 #include "savestate.h"
 #endif
 
+#if defined(ESP32)
+//#include "Tone32.h"
+#endif
+
 /***** Set display orientation, U8G2_MIRROR_VERTICAL is not supported *****/
-//#define U8G2_LAYOUT_NORMAL
-#define U8G2_LAYOUT_ROTATE_180
-//#define U8G2_LAYOUT_MIRROR
+#define U8G2_LAYOUT_NORMAL
+// #define U8G2_LAYOUT_ROTATE_180
+// #define U8G2_LAYOUT_MIRROR
 /**************************************************************************/
 
 #ifdef U8G2_LAYOUT_NORMAL
@@ -39,12 +44,7 @@ U8G2_SSD1306_128X64_NONAME_2_HW_I2C display(U8G2_R0);
 #endif
 
 #ifdef U8G2_LAYOUT_ROTATE_180
-// U8G2_SSD1306_128X64_NONAME_2_HW_I2C display(U8G2_R2);
-#define sc1_oled_scl 22//18
-#define sc1_oled_sda 21//17
-#define sc1_oled_rst 21
-//U8G2_SSD1306_128X64_NONAME_2_HW_I2C display(U8G2_R0, /* reset=*/ 21, /* clock=*/ 18, /* data=*/ 17);
-U8G2_SSD1306_128X64_NONAME_F_SW_I2C display(U8G2_R0, /* clock=*/sc1_oled_scl, /* data=*/sc1_oled_sda);//, /* reset=*/sc1_oled_rst);
+U8G2_SSD1306_128X64_NONAME_2_HW_I2C display(U8G2_R2);
 #endif
 
 #ifdef U8G2_LAYOUT_MIRROR
@@ -63,16 +63,38 @@ U8G2_SSD1306_128X64_NONAME_2_HW_I2C display(U8G2_MIRROR);
 #define PIN_BUZZER 0
 #define ENABLE_TAMA_SOUND
 #define ENABLE_TAMA_SOUND_ACTIVE_LOW
+
 #elif defined(ESP32)
-#define PIN_BTN_L 26//5
-#define PIN_BTN_M 25//6
-#define PIN_BTN_R 33//7
-#define PIN_BUZZER 32
+#define PIN_BTN_L 26
+#define PIN_BTN_M 25
+#define PIN_BTN_R 33
+#define PIN_BUZZER 15
+#define BUZZER_CHANNEL 0
+#define TONE_CHANNEL 15
+
 #else
-#define PIN_BTN_L 2
-#define PIN_BTN_M 3
-#define PIN_BTN_R 4
-#define PIN_BUZZER 9
+// #define PIN_BTN_L 2
+// #define PIN_BTN_M 3
+// #define PIN_BTN_R 4
+// #define PIN_BUZZER 9
+#endif
+
+#if defined(ESP32)
+void esp32_noTone(uint8_t pin, uint8_t channel)
+{
+  // ledcDetachPin(pin);
+  // ledcWrite(channel, 0);
+}
+
+void esp32_tone(uint8_t pin, unsigned int frequency, unsigned long duration, uint8_t channel)
+{
+  // if (!ledcRead(channel))
+  // {
+  //   ledcAttachPin(pin, channel);
+  // }
+
+  // ledcWriteTone(channel, frequency);
+}
 #endif
 
 void displayTama();
@@ -80,7 +102,7 @@ void displayTama();
 /**** TamaLib Specific Variables ****/
 static uint16_t current_freq = 0;
 static bool_t matrix_buffer[LCD_HEIGHT][LCD_WIDTH / 8] = {{0}};
-//static byte runOnceBool = 0;
+// static byte runOnceBool = 0;
 static bool_t icon_buffer[ICON_NUM] = {0};
 static cpu_state_t cpuState;
 static unsigned long lastSaveTimestamp = 0;
@@ -117,9 +139,6 @@ static void hal_update_screen(void)
 
 static void hal_set_lcd_matrix(u8_t x, u8_t y, bool_t val)
 {
-  Serial.println("hslm: (" + x);
-  Serial.println(", " + y);
-  Serial.println("): " + val);
   uint8_t mask;
   if (val)
   {
@@ -152,14 +171,18 @@ static void hal_play_frequency(bool_t en)
 #ifdef ENABLE_TAMA_SOUND
   if (en)
   {
-    tone(PIN_BUZZER, current_freq);
+
+#if defined(ESP32)
+    esp32_tone(PIN_BUZZER, current_freq, 500, BUZZER_CHANNEL);
+#else
+#endif
   }
   else
   {
-    noTone(PIN_BUZZER);
-    #ifdef ENABLE_TAMA_SOUND_ACTIVE_LOW
-    digitalWrite(PIN_BUZZER, HIGH);
-    #endif
+#if defined(ESP32)
+    esp32_noTone(PIN_BUZZER, BUZZER_CHANNEL);
+#else
+#endif
   }
 #endif
 }
@@ -176,81 +199,56 @@ static int hal_handler(void)
     if (incomingByte == 49)
     {
       hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
-      Serial.println("Left pressed");
     }
     else if (incomingByte == 50)
     {
       hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
-      Serial.println("Left released");
     }
     else if (incomingByte == 51)
     {
       hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
-      Serial.println("Middle pressed");
     }
     else if (incomingByte == 52)
     {
       hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
-      Serial.println("Middle released");
     }
     else if (incomingByte == 53)
     {
       hw_set_button(BTN_RIGHT, BTN_STATE_PRESSED);
-      Serial.println("Right pressed");
     }
     else if (incomingByte == 54)
     {
       hw_set_button(BTN_RIGHT, BTN_STATE_RELEASED);
-      Serial.println("Right released");
     }
   }
-#else
-  if (digitalRead(PIN_BTN_L) == HIGH)
+#endif
+
+  if (digitalRead(PIN_BTN_L) == BUTTON_VOLTAGE_LEVEL_PRESSED)
   {
-    Serial.println("Left button pressed.");
     hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
   }
   else
   {
-    Serial.println("Left button released.");
     hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
   }
-  if (digitalRead(PIN_BTN_M) == HIGH)
+
+  if (digitalRead(PIN_BTN_M) == BUTTON_VOLTAGE_LEVEL_PRESSED)
   {
-    Serial.println("Middle button pressed.");
     hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
   }
   else
   {
-    Serial.println("Middle button released.");
     hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
   }
-  if (digitalRead(PIN_BTN_R) == HIGH)
+
+  if (digitalRead(PIN_BTN_R) == BUTTON_VOLTAGE_LEVEL_PRESSED)
   {
-    Serial.println("Right button pressed.");
     hw_set_button(BTN_RIGHT, BTN_STATE_PRESSED);
   }
   else
   {
-    
-    Serial.println("Right button released.");
     hw_set_button(BTN_RIGHT, BTN_STATE_RELEASED);
   }
-// #ifdef ENABLE_AUTO_SAVE_STATUS
-//   if (digitalRead(PIN_BTN_SAVE) == HIGH)
-//   {
-//     if (button4state == 0)
-//     {
-//       saveStateToEEPROM(&cpuState);
-//     }
-//     button4state = 1;
-//   }
-//   else
-//   {
-//     button4state = 0;
-//   }
-// #endif
-#endif
   return 0;
 }
 
@@ -311,60 +309,40 @@ void displayTama()
   uint8_t j;
   display.firstPage();
 #ifdef U8G2_LAYOUT_ROTATE_180
-
   drawTamaSelection(49);
   display.nextPage();
 
-  for (j = 0; j < LCD_HEIGHT; j++)
+  for (j = 11; j < LCD_HEIGHT; j++)
   {
-    if (j != 5)
-      drawTamaRow(j, j * 3, 2);
+    drawTamaRow(j, j + j + j, 2);
+  }
+  display.nextPage();
+
+  for (j = 5; j <= 10; j++)
+  {
     if (j == 5)
     {
-      drawTamaRow(j, j * 3, 1);
-      display.nextPage();
-      drawTamaRow(j, j * 3 + 1, 1);
+      drawTamaRow(j, j + j + j + 1, 1);
     }
-    if (j == 10)
-      display.nextPage();
+    else
+    {
+      drawTamaRow(j, j + j + j, 2);
+    }
   }
+  display.nextPage();
 
-  // TODO: Once we get it all working hopefully remove the below
-  //uint8_t thickness = 2;
-  // // draw icons (?)
-  // for (j = 11; j < LCD_HEIGHT; j++)
-  // {
-  //   drawTamaRow(j, j * 3, thickness);
-  // }
-  // //display.nextPage();
-
-  // for (j = 5; j <= 10; j++)
-  // {
-  //   if (j == 5)
-  //   {
-  //     drawTamaRow(j, j * 3 + 1, 1);
-  //   }
-  //   else
-  //   {
-  //     drawTamaRow(j, j * 3, 2);
-  //   }
-  // }
-  // //display.nextPage();
-
-  // for (j = 0; j <= 5; j++)
-  // {
-  //   if (j == 5)
-  //   {
-  //     thickness = 1;
-  //   }
-  //   else
-  //   {
-  //     thickness = 2;
-  //   }
-  //   drawTamaRow(j, j * 3, thickness);
-  
-  // }
-  //display.nextPage();
+  for (j = 0; j <= 5; j++)
+  {
+    if (j == 5)
+    {
+      drawTamaRow(j, j + j + j, 1);
+    }
+    else
+    {
+      drawTamaRow(j, j + j + j, 2);
+    }
+  }
+  display.nextPage();
 #else
   for (j = 0; j < LCD_HEIGHT; j++)
   {
@@ -438,19 +416,23 @@ uint8_t reverseBits(uint8_t num)
 void setup()
 {
   Serial.begin(SERIAL_BAUD);
+
   pinMode(PIN_BTN_L, INPUT);
   pinMode(PIN_BTN_M, INPUT);
   pinMode(PIN_BTN_R, INPUT);
-  pinMode(PIN_BUZZER, OUTPUT);
 
+#if defined(ESP32)
+  //ledcSetup(BUZZER_CHANNEL, NOTE_C4, 8);
+#endif
+
+//  display.setI2CAddress(DISPLAY_I2C_ADDRESS * 2);
   display.begin();
 
   tamalib_register_hal(&hal);
   tamalib_set_framerate(TAMA_DISPLAY_FRAMERATE);
   tamalib_init(1000000);
 
-
-#ifdef ENABLE_AUTO_SAVE_STATUS
+#if defined(ENABLE_AUTO_SAVE_STATUS) || defined(ENABLE_LOAD_STATE_FROM_EEPROM)
   initEEPROM();
 #endif
 
@@ -458,7 +440,9 @@ void setup()
   if (validEEPROM())
   {
     loadStateFromEEPROM(&cpuState);
-  } else {
+  }
+  else
+  {
     Serial.println(F("No magic number in state, skipping state restore"));
   }
 #elif ENABLE_LOAD_HARCODED_STATE_WHEN_START
@@ -482,16 +466,19 @@ void loop()
     saveStateToEEPROM(&cpuState);
   }
 
-  if (digitalRead(PIN_BTN_M) == HIGH) {
-    if (millis() - right_long_press_started > AUTO_SAVE_MINUTES * 1000) 
+  if (digitalRead(PIN_BTN_M) == BUTTON_VOLTAGE_LEVEL_PRESSED)
+  {
+    if (millis() - right_long_press_started > AUTO_SAVE_MINUTES * 1000)
     {
       eraseStateFromEEPROM();
       Serial.println("Erased EEPROM, restarting...");
-      #if defined(ESP8266) || defined(ESP32)
+#if defined(ESP8266) || defined(ESP32)
       ESP.restart();
-      #endif
+#endif
     }
-  } else {
+  }
+  else
+  {
     right_long_press_started = millis();
   }
 #endif
