@@ -99,6 +99,10 @@ void esp32_tone(uint8_t pin, unsigned int frequency, unsigned long duration, uin
 
 void displayTama();
 
+void setMemory(uint16_t address, uint8_t value);
+uint8_t readMemory(uint16_t address);
+void dumpStateToSerial();
+
 /**** TamaLib Specific Variables ****/
 static uint16_t current_freq = 0;
 static bool_t matrix_buffer[LCD_HEIGHT][LCD_WIDTH / 8] = {{0}};
@@ -223,6 +227,43 @@ static int hal_handler(void)
   }
 #endif
 
+  // support memory operations from serial
+  if (Serial.available() > 0)
+  {
+    String input = Serial.readStringUntil('\n');
+    input.trim();
+    int spaceIndex = input.indexOf(' ');
+    if (input.equalsIgnoreCase("dump"))
+    {
+      dumpStateToSerial();
+    }
+    else if (spaceIndex == -1)
+    {
+      // Only address provided
+      uint16_t address = strtol(input.c_str(), NULL, 16);
+      uint8_t value = readMemory(address);
+      Serial.print("Value at 0x");
+      Serial.print(address, HEX);
+      Serial.print(": 0x");
+      Serial.println(value, HEX);
+    }
+    else
+    {
+      // Address and value provided
+      String addressStr = input.substring(0, spaceIndex);
+      String valueStr = input.substring(spaceIndex + 1);
+      uint16_t address = strtol(addressStr.c_str(), NULL, 16);
+      uint8_t value = strtol(valueStr.c_str(), NULL, 16);
+      setMemory(address, value);
+      Serial.print("Set 0x");
+      Serial.print(address, HEX);
+      Serial.print(" to 0x");
+      Serial.println(value, HEX);
+    }
+  }
+
+  // support buttons
+
   if (digitalRead(PIN_BTN_L) == BUTTON_VOLTAGE_LEVEL_PRESSED)
   {
     hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
@@ -264,6 +305,53 @@ static hal_t hal = {
     .play_frequency = &hal_play_frequency,
     .handler = &hal_handler,
 };
+
+// memory manipulation
+
+uint8_t readMemory(uint16_t address)
+{
+  if (address < MEMORY_SIZE)
+  {
+    cpu_get_state(&cpuState);
+    return cpuState.memory[address];
+  }
+  else
+  {
+    Serial.println("Error: Address out of bounds");
+    return 0;
+  }
+}
+
+void setMemory(uint16_t address, uint8_t value)
+{
+
+  cpu_get_state(&cpuState);
+  uint8_t *cpuS = (uint8_t *)&cpuState;
+
+  Serial.println(">");
+  Serial.println(cpuS[address]);
+  if (address < sizeof(cpu_state_t))
+  {
+    Serial.println("Setting CPU state");
+    cpuS[address] = value;
+    cpu_set_state(&cpuState);
+    return;
+  }
+  else if (address < MEMORY_SIZE)
+  {
+    Serial.println("Setting memory");
+    cpuState.memory[address] = value;
+    cpu_set_state(&cpuState);
+    return;
+  }
+  else
+  {
+    Serial.println("Error: Address out of bounds");
+    return;
+  }
+}
+
+// drawing
 
 void drawTriangle(uint8_t x, uint8_t y)
 {
@@ -363,7 +451,6 @@ void displayTama()
 #endif
 }
 
-#ifdef ENABLE_DUMP_STATE_TO_SERIAL_WHEN_START
 void dumpStateToSerial()
 {
   uint16_t i, count = 0;
@@ -381,6 +468,7 @@ void dumpStateToSerial()
     if ((count % 16) == 15)
       Serial.println("");
   }
+  Serial.print(":::");
   for (i = 0; i < MEMORY_SIZE; i++, count++)
   {
     sprintf(tmp, "0x%02X,", memTemp[i]);
@@ -399,7 +487,6 @@ void dumpStateToSerial()
     }
     Serial.println("};");  */
 }
-#endif
 
 uint8_t reverseBits(uint8_t num)
 {
