@@ -122,18 +122,19 @@ static void hal_log(log_level_t level, char *buff, ...)
   Serial.println(buff);
 }
 
-static void hal_sleep_until(timestamp_t ts)
-{
-  // int32_t remaining = (int32_t) (ts - hal_get_timestamp());
-  // if (remaining > 0) {
-  // delayMicroseconds(1);
-  // delay(1);
-  //}
-}
-
 static timestamp_t hal_get_timestamp(void)
 {
   return millis() * 1000;
+}
+
+static void hal_sleep_until(timestamp_t ts)
+{
+  int32_t remaining = (int32_t) (ts - hal_get_timestamp());
+
+  if (remaining > 0)
+  {
+    delayMicroseconds(remaining / 1000);
+  }
 }
 
 static void hal_update_screen(void)

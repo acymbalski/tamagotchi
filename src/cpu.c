@@ -28,7 +28,7 @@
 #include "rom_12bit.h"
 
 
-#define CPU_SPEED_RATIO      0
+#define CPU_SPEED_RATIO      1
 #define TICK_FREQUENCY        32768 // Hz
 
 #define TIMER_1HZ_PERIOD      32768 // in ticks
