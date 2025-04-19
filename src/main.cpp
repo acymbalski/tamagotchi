@@ -267,6 +267,10 @@ static int hal_handler(void)
         Serial.println("Invalid speed value");
       }
     }
+    else if (input.equalsIgnoreCase("load"))
+    {
+      loadHardcodedState(&cpuState);
+    }
     else if (spaceIndex == -1)
     {
       // Only address provided
