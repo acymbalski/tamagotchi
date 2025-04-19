@@ -103,6 +103,7 @@ void displayTama();
 void setMemory(uint16_t address, uint8_t value);
 uint8_t readMemory(uint16_t address);
 void dumpStateToSerial();
+void dumpStateToSerial2();
 
 /**** TamaLib Specific Variables ****/
 static uint16_t current_freq = 0;
@@ -240,6 +241,10 @@ static int hal_handler(void)
     {
       dumpStateToSerial();
     }
+    else if (input.equalsIgnoreCase("dump2"))
+    {
+      dumpStateToSerial2();
+    }
     else if (input.equalsIgnoreCase("step"))
     {
       isPaused = true;
@@ -252,6 +257,7 @@ static int hal_handler(void)
       isPaused = false;
       Serial.println("Resuming CPU");
     }
+
     else if (input.startsWith("speed"))
     {
       String speedStr = input.substring(6);
@@ -276,6 +282,8 @@ static int hal_handler(void)
       // Only address provided
       uint16_t address = strtol(input.c_str(), NULL, 16);
       uint8_t value = readMemory(address);
+      dumpStateToSerial2();
+      Serial.println("");
       Serial.print("Value at 0x");
       Serial.print(address, HEX);
       Serial.print(": 0x");
@@ -520,6 +528,61 @@ void dumpStateToSerial()
       if ((i % 18)==17) Serial.println("");
     }
     Serial.println("};");  */
+}
+
+void dumpStateToSerial2()
+{
+  dumpStateToSerial();
+  uint16_t i = 0;
+  uint16_t count = 1;
+  char tmp[10];
+  cpu_get_state(&cpuState);
+  u4_t *memTemp = cpuState.memory;
+  uint8_t *cpuS = (uint8_t *)&cpuState;
+
+  Serial.println("");
+  Serial.println("CPU State Dump:");
+  Serial.println("========================================");
+
+  uint8_t rowNum = 0;
+
+  Serial.printf("0x%03X: ", rowNum * 0x080);
+  rowNum++;
+
+  for (i = 0; i < sizeof(cpu_state_t); i++, count++)
+  {
+    Serial.printf("%02X", cpuS[i]);
+
+    if (count % 64 == 0)
+    {
+      Serial.println("");
+      Serial.printf("0x%03X: ", rowNum * 0x080);
+      rowNum++;
+    }
+  }
+
+  Serial.println("");
+  Serial.println("");
+  Serial.println("Memory Dump:");
+  Serial.println("========================================");
+  count = 1;
+  rowNum = 0;
+  Serial.printf("0x%03X: ", rowNum * 0x080);
+  rowNum++;
+
+  for (i = 0; i < MEMORY_SIZE; i++, count++)
+  {
+      Serial.printf("%02X", memTemp[i]);
+
+    if (count % 64 == 0)
+    {
+      Serial.println("");
+      Serial.printf("0x%03X: ", rowNum * 0x080);
+      rowNum++;
+    }
+  }
+
+  Serial.println("");
 }
 
 uint8_t reverseBits(uint8_t num)
