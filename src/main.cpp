@@ -352,9 +352,10 @@ static hal_t hal = {
 
 uint8_t readMemory(uint16_t address)
 {
+  cpu_get_state(&cpuState);
   if (address < MEMORY_SIZE)
   {
-    cpu_get_state(&cpuState);
+    Serial.println("Reading memory");
     return cpuState.memory[address];
   }
   else
@@ -368,20 +369,20 @@ void setMemory(uint16_t address, uint8_t value)
 {
 
   cpu_get_state(&cpuState);
-  uint8_t *cpuS = (uint8_t *)&cpuState;
-
-  Serial.println(">");
-  Serial.println(cpuS[address]);
-  if (address < sizeof(cpu_state_t))
+  // uint8_t *cpuS = (uint8_t *)&cpuState;
+  // if (address < sizeof(cpu_state_t))
+  // {
+  //   Serial.println("Setting CPU state");
+  //   cpuS[address] = value;
+  //   cpu_set_state(&cpuState);
+  //   return;
+  // }
+  if (address < MEMORY_SIZE)
   {
-    Serial.println("Setting CPU state");
-    cpuS[address] = value;
-    cpu_set_state(&cpuState);
-    return;
-  }
-  else if (address < MEMORY_SIZE)
-  {
-    Serial.println("Setting memory");
+    Serial.print("Updating memory from ");
+    Serial.print(cpuState.memory[address], HEX);
+    Serial.print(" to ");
+    Serial.println(value, HEX);
     cpuState.memory[address] = value;
     cpu_set_state(&cpuState);
     return;
