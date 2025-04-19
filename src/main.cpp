@@ -111,6 +111,7 @@ static bool_t matrix_buffer[LCD_HEIGHT][LCD_WIDTH / 8] = {{0}};
 static bool_t icon_buffer[ICON_NUM] = {0};
 static cpu_state_t cpuState;
 static unsigned long lastSaveTimestamp = 0;
+static bool isPaused = false;
 /************************************/
 
 static void hal_halt(void)
@@ -238,6 +239,18 @@ static int hal_handler(void)
     if (input.equalsIgnoreCase("dump"))
     {
       dumpStateToSerial();
+    }
+    else if (input.equalsIgnoreCase("step"))
+    {
+      isPaused = true;
+
+      Serial.println("Stepping CPU");
+      tamalib_mainloop_step_by_step(false);
+    }
+    else if (input.equalsIgnoreCase("resume"))
+    {
+      isPaused = false;
+      Serial.println("Resuming CPU");
     }
     else if (input.startsWith("speed"))
     {
@@ -562,7 +575,7 @@ uint32_t right_long_press_started = 0;
 
 void loop()
 {
-  tamalib_mainloop_step_by_step();
+  tamalib_mainloop_step_by_step(isPaused);
 #ifdef ENABLE_AUTO_SAVE_STATUS
   if ((millis() - lastSaveTimestamp) > (AUTO_SAVE_MINUTES * 60 * 1000))
   {

@@ -68,7 +68,7 @@ void tamalib_register_hal(hal_t *hal);
  */
 //void tamalib_step(void);
 //void tamalib_mainloop(void);
-void tamalib_mainloop_step_by_step(void);
+void tamalib_mainloop_step_by_step(bool_t isPaused);
 #ifdef __cplusplus
 }
 #endif

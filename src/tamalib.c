@@ -144,19 +144,20 @@ void tamalib_mainloop(void)
 	}
 } */
 
-void tamalib_mainloop_step_by_step(void)
+void tamalib_mainloop_step_by_step(bool_t isPaused)
 {
   timestamp_t ts;
 
   if (!g_hal->handler()) {
     //tamalib_step();
 
-    if (exec_mode == EXEC_MODE_RUN) {
-      if (cpu_step()) {
-        exec_mode = EXEC_MODE_PAUSE;
-        step_depth = cpu_get_depth();
-      }
+  if (!isPaused && exec_mode == EXEC_MODE_RUN)
+  {
+    if (cpu_step()) {
+    exec_mode = EXEC_MODE_PAUSE;
+    step_depth = cpu_get_depth();
     }
+  }
 
 
     /* Update the screen @ g_framerate fps */
