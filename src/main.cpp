@@ -25,6 +25,7 @@
 #include "tamalib.h"
 #include "hw.h"
 #include "bitmaps.h"
+#include "cpu.h"
 #if defined(ENABLE_AUTO_SAVE_STATUS) || defined(ENABLE_LOAD_STATE_FROM_EEPROM)
 #include "savestate.h"
 #endif
@@ -237,6 +238,21 @@ static int hal_handler(void)
     if (input.equalsIgnoreCase("dump"))
     {
       dumpStateToSerial();
+    }
+    else if (input.startsWith("speed"))
+    {
+      String speedStr = input.substring(6);
+      float speed = speedStr.toFloat();
+      if (speed >= 0)
+      {
+        set_cpu_speed_ratio(speed);
+        Serial.print("CPU speed ratio set to: ");
+        Serial.println(speed);
+      }
+      else
+      {
+        Serial.println("Invalid speed value");
+      }
     }
     else if (spaceIndex == -1)
     {

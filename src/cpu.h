@@ -148,6 +148,8 @@ void cpu_refresh_hw(void);
 
 void cpu_reset(void);
 
+void set_cpu_speed_ratio(float ratio);
+
 //u8_t cpu_get_max_number(void);
 
 //bool_t cpu_init(breakpoint_t *breakpoints, u32_t freq);

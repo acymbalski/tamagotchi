@@ -183,6 +183,8 @@ static u32_t ts_freq;
 //static u8_t speed_ratio = 0;
 static timestamp_t ref_ts;
 
+static float cpu_speed_ratio = CPU_SPEED_RATIO;
+
 /*
 static state_t cpu_state = {
   .pc = &pc,
@@ -1800,12 +1802,12 @@ static timestamp_t wait_for_cycles(timestamp_t since, u8_t cycles) {
 
   tick_counter += cycles;
 
-  if (CPU_SPEED_RATIO == 0) {
+  if (cpu_speed_ratio == 0) {
     /* Emulation will be as fast as possible */
     return g_hal->get_timestamp();
   }
 
-  deadline = since + (cycles * ts_freq)/(TICK_FREQUENCY * CPU_SPEED_RATIO);
+  deadline = since + (cycles * ts_freq)/(TICK_FREQUENCY * cpu_speed_ratio);
   g_hal->sleep_until(deadline);
 
   return deadline;
@@ -1839,6 +1841,10 @@ static void print_state(u8_t op_num, u12_t op, u13_t addr)
 }
 
 //static char logMsg[40];
+void set_cpu_speed_ratio(float ratio)
+{
+  cpu_speed_ratio = ratio;
+}
 
 void cpu_reset(void)
 {
