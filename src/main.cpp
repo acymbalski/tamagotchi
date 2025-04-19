@@ -80,6 +80,12 @@ U8G2_SSD1306_128X64_NONAME_2_HW_I2C display(U8G2_MIRROR);
 // #define PIN_BUZZER 9
 #endif
 
+#define MEM_LOC_HUNGER 20 // hunger is the first digit
+#define MEM_LOC_HAPPY 20 // happy is the second digit
+#define MEM_LOC_DISCIPLINE 21
+#define MEM_LOC_LIGHTS 25
+#define MEM_LOC_POOP 26
+
 #if defined(ESP32)
 void esp32_noTone(uint8_t pin, uint8_t channel)
 {
