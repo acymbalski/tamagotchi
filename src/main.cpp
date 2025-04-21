@@ -122,6 +122,7 @@ void dumpStateToSerial();
 void dumpStateToSerial2();
 bool isTamaUnstartedEgg();
 bool isTamaEgg();
+bool isTamaSleeping();
 
 /**** TamaLib Specific Variables ****/
 static uint16_t current_freq = 0;
@@ -292,6 +293,17 @@ static int hal_handler(void)
       else
       {
         Serial.println("Tama is not egg");
+      }
+    }
+    else if (input.equalsIgnoreCase("sleeping"))
+    {
+      if (isTamaSleeping())
+      {
+        Serial.println("Tama is sleeping");
+      }
+      else
+      {
+        Serial.println("Tama is not sleeping");
       }
     }
 
@@ -680,6 +692,13 @@ bool isTamaEgg()
 bool isTamaDead()
 {
 
+}
+
+bool isTamaSleeping()
+{
+  // tama is considered sleeping if 4A is 8-F
+  uint8_t sleepStatus = readMemory(0x4A);
+  return (sleepStatus >= 0x08 && sleepStatus <= 0x0F);
 }
 
 void feedTamaFood()
