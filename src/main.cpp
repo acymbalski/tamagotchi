@@ -120,6 +120,8 @@ void setMemory(uint16_t address, uint8_t value);
 uint8_t readMemory(uint16_t address);
 void dumpStateToSerial();
 void dumpStateToSerial2();
+bool isTamaUnstartedEgg();
+bool isTamaEgg();
 
 /**** TamaLib Specific Variables ****/
 static uint16_t current_freq = 0;
@@ -276,6 +278,21 @@ static int hal_handler(void)
     else if (input.equalsIgnoreCase("reset"))
     {
       tamalib_init(1000000);
+    }
+    else if (input.equalsIgnoreCase("egg"))
+    {
+      if (isTamaUnstartedEgg())
+      {
+        Serial.println("Tama is an unstarted egg");
+      }
+      else if (isTamaEgg())
+      {
+        Serial.println("Tama is an egg");
+      }
+      else
+      {
+        Serial.println("Tama is not egg");
+      }
     }
 
     else if (input.startsWith("speed"))
@@ -642,6 +659,22 @@ uint8_t reverseBits(uint8_t num)
       reverse_num |= 1 << ((8 - 1) - i);
   }
   return reverse_num;
+}
+
+bool isTamaUnstartedEgg()
+{
+  // tama is an unstarted egg if tama evolution (5D) is 0 and tama age (tens and ones digits) are both 0
+  // realisitically only one memory location is required but I am just being safe here
+
+  // it's important to note that 5D DOES report if the tama is an egg, but
+  // if the user has set the time and "started" the tama's life, its age will
+  // start incrementing. So if it's an egg AND it has no age, it needs to be
+  // "started."
+  return readMemory(0x5D) == 0 && readMemory(0x10) == 0 && readMemory(0x11) == 0;
+}
+bool isTamaEgg()
+{
+  return readMemory(0x5D) == 0;
 }
 
 bool isTamaDead()
