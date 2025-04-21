@@ -264,6 +264,10 @@ static int hal_handler(void)
       isPaused = false;
       Serial.println("Resuming CPU");
     }
+    else if (input.equalsIgnoreCase("reset"))
+    {
+      tamalib_init(1000000);
+    }
 
     else if (input.startsWith("speed"))
     {
