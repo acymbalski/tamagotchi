@@ -729,6 +729,10 @@ void cleanTamaPoop()
 {
 
 }
+void hatchEgg()
+{
+
+}
 
 void setTamaHunger(uint8_t hunger)
 {
