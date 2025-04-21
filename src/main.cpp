@@ -80,11 +80,12 @@ U8G2_SSD1306_128X64_NONAME_2_HW_I2C display(U8G2_MIRROR);
 // #define PIN_BUZZER 9
 #endif
 
-#define MEM_LOC_HUNGER 20 // hunger is the first digit
-#define MEM_LOC_HAPPY 20 // happy is the second digit
-#define MEM_LOC_DISCIPLINE 21
-#define MEM_LOC_LIGHTS 25
-#define MEM_LOC_POOP 26
+#define MEM_LOC_SELECTION 75
+#define MEM_LOC_HUNGER 40
+#define MEM_LOC_HAPPY 41
+#define MEM_LOC_DISCIPLINE 43
+#define MEM_LOC_LIGHTS 4B
+#define MEM_LOC_POOP 4D
 
 #if defined(ESP32)
 void esp32_noTone(uint8_t pin, uint8_t channel)
@@ -361,6 +362,22 @@ uint8_t readMemory(uint16_t address)
   cpu_get_state(&cpuState);
   if (address < MEMORY_SIZE)
   {
+    uint16_t original_address = address;
+    // take memory address and divide it by two
+    // if it has an odd address, read the lower nibble, otherwise the upper nibble
+    // read correct value
+    if ((address & 0x1) == 0)
+    {
+      // even address, read upper nibble
+      address = address >> 1; // divide by 2
+      return (cpuState.memory[address] & 0xF0) >> 4;
+    }
+    else
+    {
+      // odd address, read lower nibble
+      address = address >> 1; // divide by 2
+      return cpuState.memory[address] & 0x0F;
+    }
     Serial.println("Reading memory");
     return cpuState.memory[address];
   }
@@ -375,16 +392,26 @@ void setMemory(uint16_t address, uint8_t value)
 {
 
   cpu_get_state(&cpuState);
-  // uint8_t *cpuS = (uint8_t *)&cpuState;
-  // if (address < sizeof(cpu_state_t))
-  // {
-  //   Serial.println("Setting CPU state");
-  //   cpuS[address] = value;
-  //   cpu_set_state(&cpuState);
-  //   return;
-  // }
+
   if (address < MEMORY_SIZE)
   {
+    uint16_t original_address = address;
+    // take memory address and divide it by two
+    // if it has an odd address, set the lower nibble, otherwise the upper nibble
+
+    if ((address & 0x1) == 0)
+    {
+      // even address, set upper nibble
+      value = (value << 4) | (cpuState.memory[address] & 0x0F);
+    }
+    else
+    {
+      // odd address, set lower nibble
+      value = (value & 0x0F) | (cpuState.memory[address] & 0xF0);
+    }
+    // divide address by 2 to get the correct memory location
+    address = address >> 1;
+
     Serial.print("Updating memory from ");
     Serial.print(cpuState.memory[address], HEX);
     Serial.print(" to ");
