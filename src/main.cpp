@@ -125,6 +125,7 @@ bool isTamaEgg();
 bool isTamaSleeping();
 
 void feedTamaFood();
+void feedTamaSnack();
 
 void resetButtonReleaseCounter();
 void pressLeftButton();
@@ -338,6 +339,11 @@ static int hal_handler(void)
     {
       Serial.println("Feeding Tama food");
       feedTamaFood();
+    }
+    else if (input.equalsIgnoreCase("feed snack"))
+    {
+      Serial.println("Feeding Tama snack");
+      feedTamaSnack();
     }
     else if (input.equalsIgnoreCase("LD"))
     {
@@ -843,7 +849,57 @@ void feedTamaFood()
 }
 void feedTamaSnack()
 {
+  // set menu selection to food
+  Serial.println("Selecting food menu...");
+  setMemory(0x75, 0x01);
+  for (int i = 0; i < 1500; i++) {
+    loop();
+  }
+  // press select button for 1500 cycles to open menu
+  hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
 
+  simulatingButtons = true;
+  manualButtonControl = true;
+
+  Serial.println("Opening food menu...");
+  // cycle to wait for menu to be clicked
+  for (int i = 0; i < 3000; i++) {
+    loop();
+  }
+  hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+
+  Serial.println("Waiting for food menu to open...");
+  // wait for menu to open
+  for (int i = 0; i < 1500; i++) {
+    loop();
+  }
+
+  // select snack
+  hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
+  for (int i = 0; i < 1500; i++) {
+    loop();
+  }
+  hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
+
+  hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+  Serial.println("Selecting snack...");
+  // wait for tama to finish eating
+  for (int i = 0; i < 33000; i++) {
+    loop();
+  }
+  // release button
+  hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+  Serial.println("Food selected, tama has eaten.");
+
+  for (int i = 0; i < 1500; i++) {
+    loop();
+  }
+  // we're done, press exit button to close menu
+  pressRightButton();
+  Serial.println("Exiting food menu...");
+  manualButtonControl = false;
+
+  setMemory(0x75, 0x00);
 }
 void giveTamaMedicine()
 {
