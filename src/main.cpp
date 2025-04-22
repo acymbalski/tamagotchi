@@ -923,7 +923,7 @@ void playTamaGame()
 }
 void toggleLights()
 {
-  // toggle lights by setting memory location 0x4B to 0x01 or 0x00
+  // toggle lights
   uint8_t currentLights = readMemory(MEM_LOC_LIGHTS);
   if (currentLights == 0x0F)
   {
