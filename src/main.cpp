@@ -127,6 +127,7 @@ bool isTamaSleeping();
 void feedTamaFood();
 void feedTamaSnack();
 void checkTamaStats();
+void toggleLights();
 
 void resetButtonReleaseCounter();
 void pressLeftButton();
@@ -350,6 +351,11 @@ static int hal_handler(void)
     {
       Serial.println("Checking Tama stats");
       checkTamaStats();
+    }
+    else if (input.equalsIgnoreCase("lights"))
+    {
+      Serial.println("Toggling lights");
+      toggleLights();
     }
     else if (input.equalsIgnoreCase("LD"))
     {
@@ -917,7 +923,18 @@ void playTamaGame()
 }
 void toggleLights()
 {
-
+  // toggle lights by setting memory location 0x4B to 0x01 or 0x00
+  uint8_t currentLights = readMemory(MEM_LOC_LIGHTS);
+  if (currentLights == 0x0F)
+  {
+    Serial.println("Turning off lights...");
+    setMemory(MEM_LOC_LIGHTS, 0x00);
+  }
+  else
+  {
+    Serial.println("Turning on lights...");
+    setMemory(MEM_LOC_LIGHTS, 0x0F);
+  }
 }
 void disciplineTama()
 {
