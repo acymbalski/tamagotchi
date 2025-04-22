@@ -126,6 +126,7 @@ bool isTamaSleeping();
 
 void feedTamaFood();
 void feedTamaSnack();
+void checkTamaStats();
 
 void resetButtonReleaseCounter();
 void pressLeftButton();
@@ -344,6 +345,11 @@ static int hal_handler(void)
     {
       Serial.println("Feeding Tama snack");
       feedTamaSnack();
+    }
+    else if (input.equalsIgnoreCase("check stats"))
+    {
+      Serial.println("Checking Tama stats");
+      checkTamaStats();
     }
     else if (input.equalsIgnoreCase("LD"))
     {
@@ -924,6 +930,64 @@ void cleanTamaPoop()
 void hatchEgg()
 {
 
+}
+void checkTamaStats()
+{
+
+  uint16_t msToDisplay = 3000; // ms per page to display stats
+
+  // set menu selection to stats
+  Serial.println("Selecting stats menu...");
+  setMemory(0x75, 0x06);
+  for (int i = 0; i < 1500; i++) {
+    loop();
+  }
+
+  // press select button for 1500 cycles to open menu
+  hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+  simulatingButtons = true;
+  manualButtonControl = true;
+  Serial.println("Opening stats menu...");
+  // cycle to wait for menu to be clicked
+  for (int i = 0; i < 3000; i++) {
+    loop();
+  }
+  hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+  manualButtonControl = false;
+
+  // loop for 3000 ms
+  Serial.println("Displaying age/weight stats...");
+  unsigned long startTime = millis();
+  while (millis() - startTime < msToDisplay) {
+    loop();
+  }
+
+  pressMiddleButton();
+  startTime = millis();
+  Serial.println("Displaying discipline stats...");
+  while (millis() - startTime < msToDisplay) {
+    loop();
+  }
+
+  // next page
+  pressMiddleButton();
+  startTime = millis();
+  Serial.println("Displaying hunger stats...");
+  while (millis() - startTime < msToDisplay) {
+    loop();
+  }
+
+  pressMiddleButton();
+  startTime = millis();
+  Serial.println("Displaying happiness stats...");
+  while (millis() - startTime < msToDisplay) {
+    loop();
+  }
+
+  // that's all! exit stats menu
+  pressRightButton();
+  Serial.println("Exiting stats menu...");
+  setMemory(0x75, 0x00); // reset menu selection to none
 }
 
 void setTamaHunger(uint8_t hunger)
