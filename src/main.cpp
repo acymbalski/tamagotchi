@@ -124,6 +124,11 @@ bool isTamaUnstartedEgg();
 bool isTamaEgg();
 bool isTamaSleeping();
 
+void resetButtonReleaseCounter();
+void pressLeftButton();
+void pressMiddleButton();
+void pressRightButton();
+
 /**** TamaLib Specific Variables ****/
 static uint16_t current_freq = 0;
 static bool_t matrix_buffer[LCD_HEIGHT][LCD_WIDTH / 8] = {{0}};
@@ -132,6 +137,12 @@ static bool_t icon_buffer[ICON_NUM] = {0};
 static cpu_state_t cpuState;
 static unsigned long lastSaveTimestamp = 0;
 static bool isPaused = false;
+static bool simulatingButtons = false;
+static bool_t manualButtonControl = false;
+
+// via trial and error it looks like buttons are detected after about 140 cycles
+static uint8_t buttonReleaseResetValue = 140;
+static uint8_t buttonReleaseCounter = 0;
 /************************************/
 
 static void hal_halt(void)
@@ -321,6 +332,60 @@ static int hal_handler(void)
         Serial.println("Tama is not sleeping");
       }
     }
+    else if (input.equalsIgnoreCase("LD"))
+    {
+      // press L button
+      hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
+      Serial.println("Left button pressed");
+      simulatingButtons = true;
+      manualButtonControl = true;
+    }
+    else if (input.equalsIgnoreCase("LU"))
+    {
+      hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
+      Serial.println("Left button released");
+      simulatingButtons = false;
+    }
+    else if (input.equalsIgnoreCase("MD"))
+    {
+      hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+      Serial.println("Middle button pressed");
+      simulatingButtons = true;
+      manualButtonControl = true;
+    }
+    else if (input.equalsIgnoreCase("MU"))
+    {
+      hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+      Serial.println("Middle button released");
+      simulatingButtons = false;
+      manualButtonControl = false;
+    }
+    else if (input.equalsIgnoreCase("RD"))
+    {
+      hw_set_button(BTN_RIGHT, BTN_STATE_PRESSED);
+      Serial.println("Right button pressed");
+      simulatingButtons = true;
+      manualButtonControl = true;
+    }
+    else if (input.equalsIgnoreCase("RU"))
+    {
+      hw_set_button(BTN_RIGHT, BTN_STATE_RELEASED);
+      Serial.println("Right button released");
+      simulatingButtons = false;
+      manualButtonControl = false;
+    }
+    else if (input.equalsIgnoreCase("L"))
+    {
+      pressLeftButton();
+    }
+    else if (input.equalsIgnoreCase("M"))
+    {
+      pressMiddleButton();
+    }
+    else if (input.equalsIgnoreCase("R"))
+    {
+      pressRightButton();
+    }
 
     else if (input.startsWith("speed"))
     {
@@ -370,31 +435,36 @@ static int hal_handler(void)
 
   // support buttons
 
-  if (digitalRead(PIN_BTN_L) == BUTTON_VOLTAGE_LEVEL_PRESSED)
+  // if we are simulating buttons via serial or other means, do not attempt
+  // to set/reset button state via hardware pins
+  if (!simulatingButtons)
   {
-    hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
-  }
-  else
-  {
-    hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
-  }
+    if (digitalRead(PIN_BTN_L) == BUTTON_VOLTAGE_LEVEL_PRESSED)
+    {
+      hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
+    }
+    else
+    {
+      hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
+    }
 
-  if (digitalRead(PIN_BTN_M) == BUTTON_VOLTAGE_LEVEL_PRESSED)
-  {
-    hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
-  }
-  else
-  {
-    hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
-  }
+    if (digitalRead(PIN_BTN_M) == BUTTON_VOLTAGE_LEVEL_PRESSED)
+    {
+      hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+    }
+    else
+    {
+      hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+    }
 
-  if (digitalRead(PIN_BTN_R) == BUTTON_VOLTAGE_LEVEL_PRESSED)
-  {
-    hw_set_button(BTN_RIGHT, BTN_STATE_PRESSED);
-  }
-  else
-  {
-    hw_set_button(BTN_RIGHT, BTN_STATE_RELEASED);
+    if (digitalRead(PIN_BTN_R) == BUTTON_VOLTAGE_LEVEL_PRESSED)
+    {
+      hw_set_button(BTN_RIGHT, BTN_STATE_PRESSED);
+    }
+    else
+    {
+      hw_set_button(BTN_RIGHT, BTN_STATE_RELEASED);
+    }
   }
   return 0;
 }
@@ -817,11 +887,59 @@ void setup()
 #endif
 }
 
+void resetButtonReleaseCounter()
+{
+  buttonReleaseCounter = buttonReleaseResetValue;
+}
+void pressLeftButton()
+{
+  hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
+  simulatingButtons = true;
+  resetButtonReleaseCounter();
+  Serial.println("Simulated left button pressed");
+}
+void pressMiddleButton()
+{
+  hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+  simulatingButtons = true;
+  resetButtonReleaseCounter();
+  Serial.println("Simulated middle button pressed");
+}
+void pressRightButton()
+{
+  hw_set_button(BTN_RIGHT, BTN_STATE_PRESSED);
+  simulatingButtons = true;
+  resetButtonReleaseCounter();
+  Serial.println("Simulated right button pressed");
+}
+
 uint32_t right_long_press_started = 0;
 
 void loop()
 {
   tamalib_mainloop_step_by_step(isPaused);
+
+  if (simulatingButtons && !manualButtonControl)
+  {
+    // if we are simulating buttons, we need to release them after a few cycles
+    // to ensure the input is caught
+    if (buttonReleaseCounter > 0)
+    {
+      buttonReleaseCounter--;
+    }
+    else
+    {
+      // if we simulated a button down, reset the button state now that it has
+      // been processed
+      // release buttons after set amount of cycles
+      hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
+      hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+      hw_set_button(BTN_RIGHT, BTN_STATE_RELEASED);
+      simulatingButtons = false;
+      Serial.println("Simulated buttons released");
+    }
+  }
+
 #ifdef ENABLE_AUTO_SAVE_STATUS
   if ((millis() - lastSaveTimestamp) > (AUTO_SAVE_MINUTES * 60 * 1000))
   {
