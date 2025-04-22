@@ -80,21 +80,21 @@ U8G2_SSD1306_128X64_NONAME_2_HW_I2C display(U8G2_MIRROR);
 // #define PIN_BUZZER 9
 #endif
 
-#define MEM_LOC_SELECTION 75
-#define MEM_LOC_HUNGER 40
-#define MEM_LOC_HAPPY 41
-#define MEM_LOC_DISCIPLINE 43
-#define MEM_LOC_LIGHTS 4B
-#define MEM_LOC_POOP 4D
+#define MEM_LOC_SELECTION 0x75
+#define MEM_LOC_HUNGER 0x40
+#define MEM_LOC_HAPPY 0x41
+#define MEM_LOC_DISCIPLINE 0x43
+#define MEM_LOC_LIGHTS 0x4B
+#define MEM_LOC_POOP 0x4D
 
-#define MENU_NONE 0
-#define MENU_FOOD 1
-#define MENU_LIGHT 2
-#define MENU_GAME 3
-#define MENU_MEDICINE 4
-#define MENU_CLEAN 5
-#define MENU_STATS 6
-#define MENU_DISCIPLINE 7
+#define MENU_NONE 0x0
+#define MENU_FOOD 0x1
+#define MENU_LIGHT 0x2
+#define MENU_GAME 0x3
+#define MENU_MEDICINE 0x4
+#define MENU_CLEAN 0x5
+#define MENU_STATS 0x6
+#define MENU_DISCIPLINE 0x7
 
 #if defined(ESP32)
 void esp32_noTone(uint8_t pin, uint8_t channel)
