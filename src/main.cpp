@@ -264,12 +264,27 @@ static int hal_handler(void)
     {
       dumpStateToSerial2();
     }
-    else if (input.equalsIgnoreCase("step"))
+    else if (input.startsWith("step"))
     {
       isPaused = true;
 
-      Serial.println("Stepping CPU");
-      tamalib_mainloop_step_by_step(false);
+      String stepCountStr = input.substring(5);
+      stepCountStr.trim();
+      int stepCount = stepCountStr.toInt();
+      if (stepCount <= 0)
+      {
+        stepCount = 1; // Default to 1 if no number is given or invalid input
+      }
+
+      Serial.print("Stepping CPU ");
+      Serial.print(stepCount);
+      Serial.println(" time(s)");
+
+      for (int i = 0; i < stepCount; i++)
+      {
+        tamalib_mainloop_step_by_step(false);
+      }
+      Serial.println("Done");
     }
     else if (input.equalsIgnoreCase("resume"))
     {
