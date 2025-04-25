@@ -80,6 +80,8 @@ U8G2_SSD1306_128X64_NONAME_2_HW_I2C display(U8G2_MIRROR);
 // #define PIN_BUZZER 9
 #endif
 
+uint8_t draw_smooth = 1; // 0 if we should represent the original pixels instead
+
 #define MEM_LOC_SELECTION 0x75
 #define MEM_LOC_HUNGER 0x40
 #define MEM_LOC_HAPPY 0x41
@@ -592,13 +594,22 @@ void drawTriangle(uint8_t x, uint8_t y)
 void drawTamaRow(uint8_t tamaLCD_y, uint8_t ActualLCD_y, uint8_t thick)
 {
   uint8_t i;
+  uint8_t width = 2;
+  uint8_t thickness = thick;
+
+  if (draw_smooth == 1) {
+    width = 3;
+    thickness = 3;
+  }
+
+
   for (i = 0; i < LCD_WIDTH; i++)
   {
     uint8_t mask = 0b10000000;
     mask = mask >> (i % 8);
     if ((matrix_buffer[tamaLCD_y][i / 8] & mask) != 0)
     {
-      display.drawBox(i + i + i + 16, ActualLCD_y, 2, thick);
+      display.drawBox(i * 3 + 16, ActualLCD_y, width, thickness);
     }
   }
 }
@@ -809,6 +820,11 @@ bool isTamaSleeping()
   // tama is considered sleeping if 4A is 8-F
   uint8_t sleepStatus = readMemory(0x4A);
   return (sleepStatus >= 0x08 && sleepStatus <= 0x0F);
+}
+
+bool isTamaRequestingAttention()
+{
+
 }
 
 void feedTamaFood()
