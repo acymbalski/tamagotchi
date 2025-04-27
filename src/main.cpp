@@ -27,6 +27,7 @@
 #include "bitmaps.h"
 #include "cpu.h"
 #include "memory.h"
+#include "input.h"
 #if defined(ENABLE_AUTO_SAVE_STATUS) || defined(ENABLE_LOAD_STATE_FROM_EEPROM)
 #include "savestate.h"
 #endif
@@ -144,12 +145,6 @@ static bool_t matrix_buffer[LCD_HEIGHT][LCD_WIDTH / 8] = {{0}};
 static bool_t icon_buffer[ICON_NUM] = {0};
 static unsigned long lastSaveTimestamp = 0;
 static bool isPaused = false;
-static bool simulatingButtons = false;
-static bool_t manualButtonControl = false;
-
-// via trial and error it looks like buttons are detected after about 140 cycles
-static uint8_t buttonReleaseResetValue = 140;
-static uint8_t buttonReleaseCounter = 0;
 /************************************/
 
 static void hal_halt(void)
@@ -1017,32 +1012,6 @@ void setup()
 #ifdef ENABLE_DUMP_STATE_TO_SERIAL_WHEN_START
   dumpStateToSerial();
 #endif
-}
-
-void resetButtonReleaseCounter()
-{
-  buttonReleaseCounter = buttonReleaseResetValue;
-}
-void pressLeftButton()
-{
-  hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
-  simulatingButtons = true;
-  resetButtonReleaseCounter();
-  Serial.println("Simulated left button pressed");
-}
-void pressMiddleButton()
-{
-  hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
-  simulatingButtons = true;
-  resetButtonReleaseCounter();
-  Serial.println("Simulated middle button pressed");
-}
-void pressRightButton()
-{
-  hw_set_button(BTN_RIGHT, BTN_STATE_PRESSED);
-  simulatingButtons = true;
-  resetButtonReleaseCounter();
-  Serial.println("Simulated right button pressed");
 }
 
 uint32_t right_long_press_started = 0;
