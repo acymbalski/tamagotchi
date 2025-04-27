@@ -2,11 +2,11 @@
 
 #include "hal.h"
 
-extern bool simulatingButtons;
+extern bool_t simulatingButtons;
 extern bool_t manualButtonControl;
 
-extern uint8_t buttonReleaseResetValue;
-extern uint8_t buttonReleaseCounter;
+extern uint16_t buttonReleaseResetValue;
+extern uint16_t buttonReleaseCounter;
 
 void resetButtonReleaseCounter();
 void pressLeftButton();
