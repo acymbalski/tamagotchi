@@ -22,6 +22,11 @@
 
 #include "hal.h"
 
+#define TICK_FREQUENCY        32768 // Hz
+
+#define TIMER_1HZ_PERIOD      32768 // in ticks
+#define TIMER_256HZ_PERIOD      128 // in ticks
+
 #define MEMORY_SIZE        0x140 // MEM_RAM_SIZE + MEM_IO_SIZE
 
 #define MEM_RAM_ADDR        0x000

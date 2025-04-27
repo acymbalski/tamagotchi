@@ -29,10 +29,6 @@
 
 
 #define CPU_SPEED_RATIO      1
-#define TICK_FREQUENCY        32768 // Hz
-
-#define TIMER_1HZ_PERIOD      32768 // in ticks
-#define TIMER_256HZ_PERIOD      128 // in ticks
 
 #define MASK_4B         0xF00
 #define MASK_6B         0xFC0
