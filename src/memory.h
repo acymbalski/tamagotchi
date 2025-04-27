@@ -19,7 +19,7 @@
 #define MENU_STATS 0x6
 #define MENU_DISCIPLINE 0x7
 
-extern cpu_state_t cpuState;
+static cpu_state_t cpuState;
 
 uint8_t readMemory(uint16_t address);
 void setMemory(uint16_t address, uint8_t value);
