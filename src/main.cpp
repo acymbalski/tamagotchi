@@ -29,6 +29,7 @@
 #include "memory.h"
 #include "babysitter.h"
 #include "input.h"
+#include "networking.h"
 #if defined(ENABLE_AUTO_SAVE_STATUS) || defined(ENABLE_LOAD_STATE_FROM_EEPROM)
 #include "savestate.h"
 #endif
@@ -323,6 +324,11 @@ static int hal_handler(void)
     {
       Serial.println("Toggling lights");
       toggleLights();
+    }
+    else if (input.equalsIgnoreCase("wifi"))
+    {
+      Serial.println("Connecting to WiFi...");
+      initWifi();
     }
     else if (input.equalsIgnoreCase("LD"))
     {
