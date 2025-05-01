@@ -334,6 +334,11 @@ static int hal_handler(void)
     {
       setTimeViaNTP();
     }
+    else if (input.equalsIgnoreCase("get hunger"))
+    {
+      Serial.print("Tama hunger: ");
+      Serial.println(getTamaHunger(), DEC);
+    }
     else if (input.equalsIgnoreCase("LD"))
     {
       // press L button

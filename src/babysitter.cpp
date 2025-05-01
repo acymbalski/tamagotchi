@@ -29,10 +29,19 @@ static uint32_t elapsed_time_check_ticks = 0; // ticks since last time check
 static uint32_t ticks_between_checks = RESPONSIVENESS * 5 * (TIMER_1HZ_PERIOD); // ticks between babysitter checks
 static uint32_t ticks_between_time_checks = 60 * 10 * (TIMER_1HZ_PERIOD); // ticks between time checks (keep relatively infrequent if there is no need to sync perfectly as it may cause an emulation lag spike)
 
-// uint8_t getTamaHunger()
-// {
-
-// }
+uint8_t getTamaHunger()
+{
+    // returns tama's hunger level (0-4)
+    // A value of 0 is starving, 4 is full
+    // the memory values for hunger:
+    // 0x0 = hunger 0
+    // 0x4 = hunger 1
+    // 0x8 = hunger 2
+    // 0xC = hunger 3
+    // 0xF = hunger 4
+    uint8_t hunger = readMemory(MEM_LOC_HUNGER);
+    return hunger / 4;
+}
 
 bool isTamaUnstartedEgg()
 {
@@ -93,6 +102,8 @@ void feedTamaFood()
   for (int i = 0; i < 1500; i++) {
     loop();
   }
+
+  // TODO: check if tama refuses, maybe return False
 
   // select food
   hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
@@ -389,6 +400,12 @@ void babysitterLoop()
             // take care of the tama
             // check for illness
             // get hunger level
+            if (getTamaHunger() < 4)
+            {
+                Serial.println("Tama is hungry, feeding...");
+                feedTamaFood();
+            }
+            
             // get happiness level
             // check for poop
 
