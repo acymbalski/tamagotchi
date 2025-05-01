@@ -21,8 +21,13 @@ Can be set to PROACTIVE, REACTIVE, or INACTIVE
 #define INTENT PROACTIVE
 #define RESPONSIVENESS 1 // how many seconds between each babysitter check
 
-static uint32_t elapsed_ticks = 0; // ticks since last babysitter check
-static uint32_t ticks_between_checks = RESPONSIVENESS * (TIMER_1HZ_PERIOD / 1000); // ticks between babysitter checks
+static uint32_t elapsed_check_ticks = 0; // ticks since last babysitter check
+static uint32_t elapsed_time_check_ticks = 0; // ticks since last time check
+
+// TODO I would expect this to be as simple as #sec * TIMER_1HZ_PERIOD and yet that math isn't working
+// experimentally, 10 * TIMER_1HZ_PERIOD is about once per minute. Hmm...
+static uint32_t ticks_between_checks = RESPONSIVENESS * 5 * (TIMER_1HZ_PERIOD); // ticks between babysitter checks
+static uint32_t ticks_between_time_checks = 60 * 10 * (TIMER_1HZ_PERIOD); // ticks between time checks (keep relatively infrequent if there is no need to sync perfectly as it may cause an emulation lag spike)
 
 // uint8_t getTamaHunger()
 // {
@@ -362,13 +367,22 @@ void babysitterLoop()
     // this loop is called TIMER_1HZ_PERIOD per second
     // we will use ticks instead of actual seconds in case we are not emulating
     // at realtime
-    elapsed_ticks++;
+    elapsed_check_ticks++;
+    elapsed_time_check_ticks++;
 
-
-
-    if (elapsed_ticks >= ticks_between_checks)
+    if (elapsed_time_check_ticks >= ticks_between_time_checks)
     {
-        elapsed_ticks-= ticks_between_checks;
+        elapsed_time_check_ticks -= ticks_between_time_checks;
+
+        Serial.println("Syncing time...");
+
+        // update the time via NTP
+        setTimeViaNTP();
+    }
+
+    if (elapsed_check_ticks >= ticks_between_checks)
+    {
+        elapsed_check_ticks-= ticks_between_checks;
 
         if (INTENT == PROACTIVE)
         {
