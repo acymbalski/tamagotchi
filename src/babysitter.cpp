@@ -42,6 +42,30 @@ uint8_t getTamaHunger()
     uint8_t hunger = readMemory(MEM_LOC_HUNGER);
     return (hunger == 0xF) ? 4 : hunger / 4;
 }
+uint8_t getTamaHappiness()
+{
+    // returns tama's happiness level (0-4)
+    // A value of 0 is sad, 4 is happy
+    // the memory values for happiness:
+    // 0x0 = happiness 0
+    // 0x4 = happiness 1
+    // 0x8 = happiness 2
+    // 0xC = happiness 3
+    // 0xF = happiness 4
+    uint8_t happiness = readMemory(MEM_LOC_HAPPY);
+    return (happiness == 0xF) ? 4 : happiness / 4;
+}
+uint8_t getTamaPoop()
+{
+    // return the value of MEM_LOC_POOP
+    return readMemory(MEM_LOC_POOP);
+}
+bool isTamaSick()
+{
+    // tama is sick if MEM_LOC_SICK is >= 0x08
+    uint8_t sickStatus = readMemory(MEM_LOC_SICK);
+    return sickStatus >= 0x08;
+}
 
 bool isTamaUnstartedEgg()
 {
@@ -399,6 +423,12 @@ void babysitterLoop()
         {
             // take care of the tama
             // check for illness
+            if (isTamaSick())
+            {
+                Serial.println("Tama is sick, giving medicine...");
+                giveTamaMedicine();
+            }
+
             // get hunger level
             if (getTamaHunger() < 4)
             {
@@ -407,7 +437,18 @@ void babysitterLoop()
             }
             
             // get happiness level
+            if (getTamaHappiness() < 4)
+            {
+                Serial.println("Tama is sad, playing game...");
+                playTamaGame();
+            }
+
             // check for poop
+            if (getTamaPoop() > 0)
+            {
+                Serial.println("Tama has poop, cleaning...");
+                cleanTamaPoop();
+            }
 
         }
         else if (INTENT == REACTIVE)

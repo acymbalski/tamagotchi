@@ -339,6 +339,27 @@ static int hal_handler(void)
       Serial.print("Tama hunger: ");
       Serial.println(getTamaHunger(), DEC);
     }
+    else if (input.equalsIgnoreCase("get happiness"))
+    {
+      Serial.print("Tama happiness: ");
+      Serial.println(getTamaHappiness(), DEC);
+    }
+    else if (input.equalsIgnoreCase("is sick"))
+    {
+      if (isTamaSick())
+      {
+        Serial.println("Tama is sick");
+      }
+      else
+      {
+        Serial.println("Tama is not sick");
+      }
+    }
+    else if (input.equalsIgnoreCase("get poop"))
+    {
+      Serial.print("Tama poop: ");
+      Serial.println(getTamaPoop(), DEC);
+    }
     else if (input.equalsIgnoreCase("LD"))
     {
       // press L button

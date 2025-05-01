@@ -7,6 +7,7 @@
 #define MEM_LOC_HUNGER 0x40
 #define MEM_LOC_HAPPY 0x41
 #define MEM_LOC_DISCIPLINE 0x43
+#define MEM_LOC_SICK 0x48
 #define MEM_LOC_LIGHTS 0x4B
 #define MEM_LOC_POOP 0x4D
 
@@ -30,6 +31,9 @@ bool isTamaEgg();
 bool isTamaSleeping();
 
 uint8_t getTamaHunger();
+uint8_t getTamaHappiness();
+uint8_t getTamaPoop();
+bool isTamaSick();
 
 void feedTamaFood();
 void feedTamaSnack();
