@@ -1,6 +1,6 @@
 #include "networking.h"
 #include "WiFi.h"
-#include "time.h"
+#include "Arduino.h"
 
 const char* ssid = "SSID";
 const char* password = "PASSWORD";
@@ -19,10 +19,20 @@ void initWifi()
     WiFi.setHostname(hostname); //define hostname
     WiFi.begin(ssid, password);
     Serial.print("Connecting to WiFi ..");
-    // TODO need to set a timeout here
-    while (WiFi.status() != WL_CONNECTED) {
-      Serial.print('.');
-      delay(1000);
+
+    uint32_t startTime = millis();
+    uint8_t timeout_s = 10;
+
+    while (WiFi.status() != WL_CONNECTED )
+    {
+        Serial.print('.');
+        delay(1000);
+
+        if (millis() - startTime > timeout_s * 1000)
+        {
+            Serial.println("Connection timed out.");
+            return; // exit if connection times out
+        }
     }
     Serial.println(WiFi.localIP());
 
@@ -39,8 +49,16 @@ tm getTime()
         Serial.println("WiFi not connected, attempting to connect...");
         initWifi();
     }
-    // get time from NTP server
-    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        // get time from NTP server
+        configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+    }
+    else
+    {
+        Serial.println("Failed to retrieve updated time from NTP, WiFi not connected.");
+    }
+
     printLocalTime();
     if(!getLocalTime(&timeinfo)){
       Serial.println("Failed to obtain time");
