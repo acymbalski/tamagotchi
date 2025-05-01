@@ -40,7 +40,7 @@ uint8_t getTamaHunger()
     // 0xC = hunger 3
     // 0xF = hunger 4
     uint8_t hunger = readMemory(MEM_LOC_HUNGER);
-    return hunger / 4;
+    return (hunger == 0xF) ? 4 : hunger / 4;
 }
 
 bool isTamaUnstartedEgg()
