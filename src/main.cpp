@@ -360,6 +360,11 @@ static int hal_handler(void)
       Serial.print("Tama poop: ");
       Serial.println(getTamaPoop(), DEC);
     }
+    else if (input.equalsIgnoreCase("clean poop"))
+    {
+      Serial.println("Cleaning Tama poop");
+      cleanTamaPoop();
+    }
     else if (input.equalsIgnoreCase("LD"))
     {
       // press L button

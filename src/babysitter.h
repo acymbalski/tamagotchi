@@ -10,6 +10,7 @@
 #define MEM_LOC_SICK 0x48
 #define MEM_LOC_LIGHTS 0x4B
 #define MEM_LOC_POOP 0x4D
+#define MEM_LOC_MENU 0x75
 
 #define MENU_NONE 0x0
 #define MENU_FOOD 0x1
@@ -38,6 +39,7 @@ bool isTamaSick();
 void feedTamaFood();
 void feedTamaSnack();
 void checkTamaStats();
+void cleanTamaPoop();
 void toggleLights();
 void setTime(tm time);
 bool setTimeViaNTP();

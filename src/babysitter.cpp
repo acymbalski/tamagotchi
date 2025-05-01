@@ -234,6 +234,24 @@ void disciplineTama()
 }
 void cleanTamaPoop()
 {
+    // set menu selection to cleaning
+    Serial.println("Selecting cleaning menu...");
+    setMemory(MEM_LOC_MENU, MENU_CLEAN);
+    for (int i = 0; i < 1500; i++) {
+        loop();
+    }
+    // press select button for 1500 cycles to open menu
+    hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+
+    simulatingButtons = true;
+    manualButtonControl = true;
+
+    // cycle to wait for menu to be clicked
+    for (int i = 0; i < 3000; i++)
+    {
+        loop();
+    }
+    hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
 
 }
 void hatchEgg()
