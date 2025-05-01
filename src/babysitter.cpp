@@ -206,7 +206,26 @@ void feedTamaSnack()
 }
 void giveTamaMedicine()
 {
+    // set menu selection to cleaning
+    Serial.println("Selecting medicine menu...");
+    setMemory(MEM_LOC_MENU, MENU_MEDICINE);
+    for (int i = 0; i < 1500; i++) {
+        loop();
+    }
+    // press select button for 1500 cycles to open menu
+    hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
 
+    simulatingButtons = true;
+    manualButtonControl = true;
+
+    // cycle to wait for menu to be clicked
+    for (int i = 0; i < 3000; i++)
+    {
+        loop();
+    }
+    hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+    
+    setMemory(MEM_LOC_MENU, MENU_NONE);
 }
 void playTamaGame()
 {
@@ -423,6 +442,7 @@ void babysitterLoop()
     elapsed_check_ticks++;
     elapsed_time_check_ticks++;
 
+
     if (elapsed_time_check_ticks >= ticks_between_time_checks)
     {
         elapsed_time_check_ticks -= ticks_between_time_checks;
@@ -445,20 +465,7 @@ void babysitterLoop()
             {
                 Serial.println("Tama is sick, giving medicine...");
                 giveTamaMedicine();
-            }
-
-            // get hunger level
-            if (getTamaHunger() < 4)
-            {
-                Serial.println("Tama is hungry, feeding...");
-                feedTamaFood();
-            }
-            
-            // get happiness level
-            if (getTamaHappiness() < 4)
-            {
-                Serial.println("Tama is sad, playing game...");
-                playTamaGame();
+                return;
             }
 
             // check for poop
@@ -466,6 +473,23 @@ void babysitterLoop()
             {
                 Serial.println("Tama has poop, cleaning...");
                 cleanTamaPoop();
+                return;
+            }
+
+            // get hunger level
+            if (getTamaHunger() < 4)
+            {
+                Serial.println("Tama is hungry, feeding...");
+                feedTamaFood();
+                return;
+            }
+            
+            // get happiness level
+            if (getTamaHappiness() < 4)
+            {
+                Serial.println("Tama is sad, playing game...");
+                playTamaGame();
+                return;
             }
 
         }
