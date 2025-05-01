@@ -42,26 +42,31 @@ void setMemory(uint16_t address, uint8_t value)
   if (address < MEMORY_SIZE)
   {
     uint16_t original_address = address;
+
+    // divide address by 2 to get the correct memory location
+    address = address >> 1;
     // take memory address and divide it by two
     // if it has an odd address, set the lower nibble, otherwise the upper nibble
 
-    if ((address & 0x1) == 0)
+    if ((original_address & 0x1) == 0)
     {
       // even address, set upper nibble
       value = (value << 4) | (cpuState.memory[address] & 0x0F);
+      Serial.println("Even, setting upper nibble");
     }
     else
     {
       // odd address, set lower nibble
-      value = (value & 0x0F) | (cpuState.memory[address] & 0xF0);
+      value = (cpuState.memory[address] & 0xF0) | (value);
+      Serial.println("Odd, setting lower nibble");
     }
-    // divide address by 2 to get the correct memory location
-    address = address >> 1;
 
     Serial.print("Updating memory from ");
     Serial.print(cpuState.memory[address], HEX);
     Serial.print(" to ");
     Serial.println(value, HEX);
+    Serial.println("(Original memory address: 0x" + String(original_address, HEX) + ")");
+    Serial.println("(New address: 0x" + String(address, HEX) + ")");
     cpuState.memory[address] = value;
     cpu_set_state(&cpuState);
     return;
