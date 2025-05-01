@@ -330,6 +330,10 @@ static int hal_handler(void)
       Serial.println("Connecting to WiFi...");
       initWifi();
     }
+    else if (input.equalsIgnoreCase("ntp"))
+    {
+      setTimeViaNTP();
+    }
     else if (input.equalsIgnoreCase("LD"))
     {
       // press L button

@@ -16,6 +16,7 @@ Can be set to PROACTIVE, REACTIVE, or INACTIVE
 #include "input.h"
 #include "memory.h"
 #include "hw.h"
+#include "networking.h"
 
 #define INTENT PROACTIVE
 #define RESPONSIVENESS 1 // how many seconds between each babysitter check
@@ -275,14 +276,85 @@ void setTamaPoop(uint8_t poop)
 
 }
 
-bool setTimeViaNTP() {
-  // Stub implementation
-  // Add NTP time synchronization logic here
-  return false; // Return true if time was successfully set
+void setTime(tm time)
+{
+    // 0x0014-15 - Time (hours) (This is a flipped byte. x10 = 1AM, xA0 = 10AM, xF0 = 3PM, x01 = 4PM, x61 = 10PM, x71 = 11PM, x00 = 12PM (midnight)
+    /*
+    0x00 - 12PM (midnight)
+    0x10 - 1AM
+    0x20 - 2AM
+    0x30 - 3AM
+    0x40 - 4AM
+    0x50 - 5AM
+    0x60 - 6AM
+    0x70 - 7AM
+    0x80 - 8AM
+    0x90 - 9AM
+    0xA0 - 10AM
+    0xB0 - 11AM
+    0xC0 - 12PM (noon)
+    0xD0 - 1PM
+    0xE0 - 2PM
+    0xF0 - 3PM
+    0x01 - 4PM
+    0x11 - 5PM
+    0x21 - 6PM
+    0x31 - 7PM
+    0x41 - 8PM
+    0x51 - 9PM
+    0x61 - 10PM
+    0x71 - 11PM
+    */
+   // get the 24h time in DEC, convert to HEX, then flip the bytes
+    uint8_t hour = time.tm_hour;
+    uint8_t minutes = time.tm_min;
+    uint8_t seconds = time.tm_sec;
+
+    // get hex value for each, grab top and bottom digits
+    // Ex. 0xA1 = 0xA and 0x1
+    uint8_t hoursOnesDigit = hour % 0x10;
+    uint8_t hoursTensDigit = hour / 0x10;
+    uint8_t minutesOnesDigit = minutes % 10;
+    uint8_t minutesTensDigit = minutes / 10;
+    uint8_t secondsOnesDigit = seconds % 10;
+    uint8_t secondsTensDigit = seconds / 10;
+
+    Serial.println("Setting time in memory...");
+    Serial.print("Hour: ");
+    Serial.print(hour);
+    Serial.print(" (Ones: ");
+    Serial.print(hoursOnesDigit, HEX);
+    Serial.print(", Tens: ");
+    Serial.print(hoursTensDigit, HEX);
+    Serial.println(")");
+    Serial.print("Minutes: ");
+    Serial.print(minutes);
+    Serial.print(" (Ones: ");
+    Serial.print(minutesOnesDigit, HEX);
+    Serial.print(", Tens: ");
+    Serial.print(minutesTensDigit, HEX);
+    Serial.println(")");
+    Serial.print("Seconds: ");
+    Serial.print(seconds);
+    Serial.print(" (Ones: ");
+    Serial.print(secondsOnesDigit, HEX);
+    Serial.print(", Tens: ");
+    Serial.print(secondsTensDigit, HEX);
+    Serial.println(")");
+
+    // TODO I don't like executing 6 memory writes in a row
+    setMemory(0x10, secondsOnesDigit);
+    setMemory(0x11, secondsTensDigit); // Set 0x11 to seconds in hex (flipped)
+    setMemory(0x12, minutesOnesDigit); // Set 0x12 to minutes ones digit in hex (flipped)
+    setMemory(0x13, minutesTensDigit); // Set 0x13 to minutes tens digit in hex (flipped)
+    setMemory(0x14, hoursOnesDigit); // Set 0x14 to hour in hex (flipped)
+    setMemory(0x15, hoursTensDigit);
 }
-void setTime(const char* timeText) {
-  // Stub implementation
-  // Add logic to parse and set time here
+bool setTimeViaNTP()
+{
+    tm time = getTime();
+    setTime(time);
+    return true; // Return true if time was successfully set
 }
 
 void babysitterLoop()

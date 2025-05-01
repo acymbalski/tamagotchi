@@ -1,6 +1,7 @@
 #ifndef BABYSITTER_H
 #define BABYSITTER_H
 
+#include "time.h"
 
 typedef enum {
     PROACTIVE,
@@ -16,6 +17,8 @@ void feedTamaFood();
 void feedTamaSnack();
 void checkTamaStats();
 void toggleLights();
+void setTime(tm time);
+bool setTimeViaNTP();
 
 void babysitterLoop();
 
