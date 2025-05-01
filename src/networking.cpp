@@ -19,14 +19,34 @@ void initWifi()
     WiFi.setHostname(hostname); //define hostname
     WiFi.begin(ssid, password);
     Serial.print("Connecting to WiFi ..");
+    // TODO need to set a timeout here
     while (WiFi.status() != WL_CONNECTED) {
       Serial.print('.');
       delay(1000);
     }
     Serial.println(WiFi.localIP());
 
+    // printLocalTime();
+}
+
+tm getTime()
+{
+    struct tm timeinfo;
+
+    // refresh time from NTP
+    // if not connected, connect
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("WiFi not connected, attempting to connect...");
+        initWifi();
+    }
+    // get time from NTP server
     configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
     printLocalTime();
+    if(!getLocalTime(&timeinfo)){
+      Serial.println("Failed to obtain time");
+      return timeinfo;
+    }
+    return timeinfo;
 }
 
 void printLocalTime()
