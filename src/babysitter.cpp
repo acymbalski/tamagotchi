@@ -97,6 +97,13 @@ bool isTamaSleeping()
 
 bool isTamaRequestingAttention()
 {
+    uint8_t needsAttention = readMemory(0x0208);
+    // tama is calling for attention if 0x0208 is not zero
+    return needsAttention != 0;
+}
+
+bool isTamaNeedingAttention()
+{
 
 }
 
