@@ -639,7 +639,11 @@ void displayTama()
       drawTamaRow(j, j + j + j + 1, 1);
     }
     if (j == 10)
+    {
+      drawTamaRow(j, j + j + j, 1);
       display.nextPage();
+      drawTamaRow(j, j + j + j + 1, 1);
+    }
   }
   display.nextPage();
   drawTamaSelection(49);
