@@ -315,6 +315,11 @@ static int hal_handler(void)
       Serial.println("Feeding Tama snack");
       feedTamaSnack();
     }
+    else if (input.equalsIgnoreCase("play game"))
+    {
+      Serial.println("Playing game");
+      playTamaGame();
+    }
     else if (input.equalsIgnoreCase("check stats"))
     {
       Serial.println("Checking Tama stats");

@@ -230,7 +230,67 @@ void giveTamaMedicine()
 }
 void playTamaGame()
 {
+  // set menu selection to food
+  Serial.println("Selecting game menu...");
+  setMemory(MEM_LOC_MENU, MENU_GAME);
+  for (int i = 0; i < 3000; i++) {
+    tamalib_mainloop_step_by_step(false);
+  }
+  hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
 
+  simulatingButtons = true;
+  manualButtonControl = true;
+
+  Serial.println("Opening game menu...");
+  // cycle to wait for menu to be clicked
+  for (int i = 0; i < 3000; i++) {
+    tamalib_mainloop_step_by_step(false);
+  }
+  hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+
+  Serial.println("Waiting for game menu to open...");
+  // wait for menu to open
+  for (int i = 0; i < 15000; i++) {
+    tamalib_mainloop_step_by_step(false);
+  }
+
+  // TODO: check if tama refuses, maybe return False
+
+  // loop five times
+  for (int i = 0; i < 5; i++)
+  {
+    // will we succeed or fail?
+    // get mem loc 0x84. If 8, we will succeed
+    //bool_t will_succeed = (readMemory(0x84) == 0x08);
+    // randomly decide... should we win?
+    // or... force a win
+    setMemory(0x84, 0x08); // force a win
+
+    // press left or middle randomly
+    // (not random for now)
+    hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
+    for (int i = 0; i < 42000; i++)
+    {
+        tamalib_mainloop_step_by_step(false);
+    }
+    hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
+    
+    for (int i = 0; i < 3000; i++)
+    {
+        tamalib_mainloop_step_by_step(false);
+    }
+  }
+
+
+  for (int i = 0; i < 30000; i++) {
+    tamalib_mainloop_step_by_step(false);
+  }
+
+  // we're done!
+  manualButtonControl = false;
+  
+  setMemory(MEM_LOC_MENU, MENU_NONE); // reset menu selection to none
+  Serial.println("Exiting game...");
 }
 void toggleLights()
 {

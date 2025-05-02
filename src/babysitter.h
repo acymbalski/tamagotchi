@@ -38,6 +38,7 @@ bool isTamaSick();
 
 void feedTamaFood();
 void feedTamaSnack();
+void playTamaGame();
 void checkTamaStats();
 void cleanTamaPoop();
 void toggleLights();
