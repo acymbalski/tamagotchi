@@ -17,6 +17,7 @@ Can be set to PROACTIVE, REACTIVE, or INACTIVE
 #include "memory.h"
 #include "hw.h"
 #include "networking.h"
+#include "tamalib.h"
 
 #define INTENT PROACTIVE
 #define RESPONSIVENESS 1 // how many seconds between each babysitter check
@@ -106,7 +107,7 @@ void feedTamaFood()
   Serial.println("Selecting food menu...");
   setMemory(0x75, 0x01);
   for (int i = 0; i < 1500; i++) {
-    loop();
+    tamalib_mainloop_step_by_step(false);
   }
   // press select button for 1500 cycles to open menu
   hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
@@ -117,14 +118,14 @@ void feedTamaFood()
   Serial.println("Opening food menu...");
   // cycle to wait for menu to be clicked
   for (int i = 0; i < 3000; i++) {
-    loop();
+    tamalib_mainloop_step_by_step(false);
   }
   hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
 
   Serial.println("Waiting for food menu to open...");
   // wait for menu to open
   for (int i = 0; i < 1500; i++) {
-    loop();
+    tamalib_mainloop_step_by_step(false);
   }
 
   // TODO: check if tama refuses, maybe return False
@@ -134,14 +135,14 @@ void feedTamaFood()
   Serial.println("Selecting food...");
   // wait for tama to finish eating
   for (int i = 0; i < 33000; i++) {
-    loop();
+    tamalib_mainloop_step_by_step(false);
   }
   // release button
   hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
   Serial.println("Food selected, tama has eaten.");
 
   for (int i = 0; i < 1500; i++) {
-    loop();
+    tamalib_mainloop_step_by_step(false);
   }
   // we're done, press exit button to close menu
   pressRightButton();
@@ -156,7 +157,7 @@ void feedTamaSnack()
   Serial.println("Selecting food menu...");
   setMemory(0x75, 0x01);
   for (int i = 0; i < 1500; i++) {
-    loop();
+    tamalib_mainloop_step_by_step(false);
   }
   // press select button for 1500 cycles to open menu
   hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
@@ -167,20 +168,20 @@ void feedTamaSnack()
   Serial.println("Opening food menu...");
   // cycle to wait for menu to be clicked
   for (int i = 0; i < 3000; i++) {
-    loop();
+    tamalib_mainloop_step_by_step(false);
   }
   hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
 
   Serial.println("Waiting for food menu to open...");
   // wait for menu to open
   for (int i = 0; i < 1500; i++) {
-    loop();
+    tamalib_mainloop_step_by_step(false);
   }
 
   // select snack
   hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
   for (int i = 0; i < 1500; i++) {
-    loop();
+    tamalib_mainloop_step_by_step(false);
   }
   hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
 
@@ -188,14 +189,14 @@ void feedTamaSnack()
   Serial.println("Selecting snack...");
   // wait for tama to finish eating
   for (int i = 0; i < 33000; i++) {
-    loop();
+    tamalib_mainloop_step_by_step(false);
   }
   // release button
   hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
   Serial.println("Food selected, tama has eaten.");
 
   for (int i = 0; i < 1500; i++) {
-    loop();
+    tamalib_mainloop_step_by_step(false);
   }
   // we're done, press exit button to close menu
   pressRightButton();
@@ -210,7 +211,7 @@ void giveTamaMedicine()
     Serial.println("Selecting medicine menu...");
     setMemory(MEM_LOC_MENU, MENU_MEDICINE);
     for (int i = 0; i < 1500; i++) {
-        loop();
+        tamalib_mainloop_step_by_step(false);
     }
     // press select button for 1500 cycles to open menu
     hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
@@ -221,7 +222,7 @@ void giveTamaMedicine()
     // cycle to wait for menu to be clicked
     for (int i = 0; i < 3000; i++)
     {
-        loop();
+        tamalib_mainloop_step_by_step(false);
     }
     hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
     
@@ -257,7 +258,7 @@ void cleanTamaPoop()
     Serial.println("Selecting cleaning menu...");
     setMemory(MEM_LOC_MENU, MENU_CLEAN);
     for (int i = 0; i < 1500; i++) {
-        loop();
+        tamalib_mainloop_step_by_step(false);
     }
     // press select button for 1500 cycles to open menu
     hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
@@ -268,7 +269,7 @@ void cleanTamaPoop()
     // cycle to wait for menu to be clicked
     for (int i = 0; i < 3000; i++)
     {
-        loop();
+        tamalib_mainloop_step_by_step(false);
     }
     hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
 
@@ -286,7 +287,7 @@ void checkTamaStats()
   Serial.println("Selecting stats menu...");
   setMemory(0x75, 0x06);
   for (int i = 0; i < 1500; i++) {
-    loop();
+    tamalib_mainloop_step_by_step(false);
   }
 
   // press select button for 1500 cycles to open menu
@@ -296,7 +297,7 @@ void checkTamaStats()
   Serial.println("Opening stats menu...");
   // cycle to wait for menu to be clicked
   for (int i = 0; i < 3000; i++) {
-    loop();
+    tamalib_mainloop_step_by_step(false);
   }
   hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
   manualButtonControl = false;
@@ -305,14 +306,14 @@ void checkTamaStats()
   Serial.println("Displaying age/weight stats...");
   unsigned long startTime = millis();
   while (millis() - startTime < msToDisplay) {
-    loop();
+    tamalib_mainloop_step_by_step(false);
   }
 
   pressMiddleButton();
   startTime = millis();
   Serial.println("Displaying discipline stats...");
   while (millis() - startTime < msToDisplay) {
-    loop();
+    tamalib_mainloop_step_by_step(false);
   }
 
   // next page
@@ -320,14 +321,14 @@ void checkTamaStats()
   startTime = millis();
   Serial.println("Displaying hunger stats...");
   while (millis() - startTime < msToDisplay) {
-    loop();
+    tamalib_mainloop_step_by_step(false);
   }
 
   pressMiddleButton();
   startTime = millis();
   Serial.println("Displaying happiness stats...");
   while (millis() - startTime < msToDisplay) {
-    loop();
+    tamalib_mainloop_step_by_step(false);
   }
 
   // that's all! exit stats menu
