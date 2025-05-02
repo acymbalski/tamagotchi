@@ -375,32 +375,44 @@ void checkTamaStats()
     tamalib_mainloop_step_by_step(false);
   }
 
-  pressMiddleButton();
+  hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
   startTime = millis();
   Serial.println("Displaying discipline stats...");
   while (millis() - startTime < msToDisplay) {
     tamalib_mainloop_step_by_step(false);
   }
+  hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+  for (int i = 0; i < 3000; i++) {
+    tamalib_mainloop_step_by_step(false);
+  }
 
   // next page
-  pressMiddleButton();
+  hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
   startTime = millis();
   Serial.println("Displaying hunger stats...");
   while (millis() - startTime < msToDisplay) {
     tamalib_mainloop_step_by_step(false);
   }
+  hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+  for (int i = 0; i < 3000; i++) {
+    tamalib_mainloop_step_by_step(false);
+  }
 
-  pressMiddleButton();
+  hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
   startTime = millis();
   Serial.println("Displaying happiness stats...");
   while (millis() - startTime < msToDisplay) {
+    tamalib_mainloop_step_by_step(false);
+  }
+  hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+  for (int i = 0; i < 3000; i++) {
     tamalib_mainloop_step_by_step(false);
   }
 
   // that's all! exit stats menu
   pressRightButton();
   Serial.println("Exiting stats menu...");
-  setMemory(0x75, 0x00); // reset menu selection to none
+  setMemory(MEM_LOC_MENU, MENU_NONE); // reset menu selection to none
 }
 
 void setTamaHunger(uint8_t hunger)
