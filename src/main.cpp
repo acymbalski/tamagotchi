@@ -370,6 +370,24 @@ static int hal_handler(void)
       Serial.println("Cleaning Tama poop");
       cleanTamaPoop();
     }
+    else if (input.equalsIgnoreCase("intent proactive"))
+    {
+      // set intent to proactive
+      Serial.println("Setting intent to proactive");
+      currentIntent = PROACTIVE;
+    }
+    else if (input.equalsIgnoreCase("intent reactive"))
+    {
+      // set intent to reactive
+      Serial.println("Setting intent to reactive");
+      currentIntent = REACTIVE;
+    }
+    else if (input.equalsIgnoreCase("intent inactive"))
+    {
+      // set intent to inactive
+      Serial.println("Setting intent to inactive");
+      currentIntent = INACTIVE;
+    }
     else if (input.equalsIgnoreCase("LD"))
     {
       // press L button

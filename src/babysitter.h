@@ -27,6 +27,11 @@ typedef enum {
     INACTIVE
 } BabysitterMode;
 
+#define INTENT PROACTIVE
+#define RESPONSIVENESS 1 // how many seconds between each babysitter check
+
+extern BabysitterMode currentIntent;
+
 bool isTamaUnstartedEgg();
 bool isTamaEgg();
 bool isTamaSleeping();

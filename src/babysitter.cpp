@@ -19,8 +19,7 @@ Can be set to PROACTIVE, REACTIVE, or INACTIVE
 #include "networking.h"
 #include "tamalib.h"
 
-#define INTENT PROACTIVE
-#define RESPONSIVENESS 1 // how many seconds between each babysitter check
+BabysitterMode currentIntent = INTENT;
 
 static uint32_t elapsed_check_ticks = 0; // ticks since last babysitter check
 static uint32_t elapsed_time_check_ticks = 0; // ticks since last time check
@@ -518,7 +517,7 @@ void babysitterLoop()
     {
         elapsed_check_ticks-= ticks_between_checks;
 
-        if (INTENT == PROACTIVE)
+        if (currentIntent == PROACTIVE)
         {
             // take care of the tama
             // check for illness
@@ -554,7 +553,7 @@ void babysitterLoop()
             }
 
         }
-        else if (INTENT == REACTIVE)
+        else if (currentIntent == REACTIVE)
         {
             // if tama needs attention...
             // check for illness
@@ -562,7 +561,7 @@ void babysitterLoop()
             // get happiness level
             // check for poop
         }
-        else if (INTENT == INACTIVE)
+        else if (currentIntent == INACTIVE)
         {
             // do nothing
         }
