@@ -628,21 +628,24 @@ void displayTama()
   }
   display.nextPage();
 #else
+  uint8_t height_factor = 3; // typically 3. This is essentially "pixel size"
+  uint8_t height_adjustment = 0;//15;
+
+
+  // draw the tamagotchi row-by-row
+  // 'j' is the row number. Iterate through each pixel-row (of the original LCD,
+  // not the esp32 display) and draw that row (drawTamaRow)
   for (j = 0; j < LCD_HEIGHT; j++)
   {
-    if (j != 5)
-      drawTamaRow(j, j + j + j, 2);
-    if (j == 5)
+    if (j != 5 && j != 10)
     {
-      drawTamaRow(j, j + j + j, 1);
-      display.nextPage();
-      drawTamaRow(j, j + j + j + 1, 1);
+      drawTamaRow(j, j * height_factor + height_adjustment, 2);
     }
-    if (j == 10)
+    else if (j == 5 || j == 10)
     {
-      drawTamaRow(j, j + j + j, 1);
+      drawTamaRow(j, j * height_factor + height_adjustment, 1);
       display.nextPage();
-      drawTamaRow(j, j + j + j + 1, 1);
+      drawTamaRow(j, j * height_factor + height_adjustment + 1, 1);
     }
   }
   display.nextPage();
