@@ -85,7 +85,7 @@ bool isTamaEgg()
 
 bool isTamaDead()
 {
-
+  return false; // stub — not yet implemented
 }
 
 bool isTamaSleeping()
@@ -104,7 +104,7 @@ bool isTamaRequestingAttention()
 
 bool isTamaNeedingAttention()
 {
-
+  return false; // stub — not yet implemented
 }
 
 void feedTamaFood()
