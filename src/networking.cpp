@@ -1,9 +1,8 @@
 #include "networking.h"
+#include "wifi_config.h"
 #include "WiFi.h"
 #include "Arduino.h"
 
-const char* ssid = "SSID";
-const char* password = "PASSWORD";
 const char* hostname = "tamagotchi";
 
 const char* ntpServer = "pool.ntp.org";
