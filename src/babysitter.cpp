@@ -572,6 +572,8 @@ void babysitterLoop()
     if (isTamaUnstartedEgg()) {
         Serial.println("Unstarted egg detected, auto-hatching...");
         hatchEgg();
+        Serial.println("Setting time after hatch...");
+        setTimeViaNTP();
         return;
     }
 
