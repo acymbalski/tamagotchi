@@ -2,3 +2,4 @@
 .vscode
 src/wifi_config.h
 pc/build/
+.claude/

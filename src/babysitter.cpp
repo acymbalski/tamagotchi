@@ -23,6 +23,11 @@ BabysitterMode currentIntent = INTENT;
 
 static uint32_t elapsed_check_ticks = 0; // ticks since last babysitter check
 static uint32_t elapsed_time_check_ticks = 0; // ticks since last time check
+static bool eggInitiated = false; // set after hatchEgg() runs; cleared on hard reset
+
+void resetBabysitterState() {
+    eggInitiated = false;
+}
 
 // TODO I would expect this to be as simple as #sec * TIMER_1HZ_PERIOD and yet that math isn't working
 // experimentally, 10 * TIMER_1HZ_PERIOD is about once per minute. Hmm...
@@ -69,14 +74,25 @@ bool isTamaSick()
 
 bool isTamaUnstartedEgg()
 {
-  // tama is an unstarted egg if tama evolution (5D) is 0 and tama age (tens and ones digits) are both 0
-  // realisitically only one memory location is required but I am just being safe here
-
-  // it's important to note that 5D DOES report if the tama is an egg, but
-  // if the user has set the time and "started" the tama's life, its age will
-  // start incrementing. So if it's an egg AND it has no age, it needs to be
-  // "started."
-  return readMemory(0x5D) == 0 && readMemory(0x10) == 0 && readMemory(0x11) == 0;
+  // The ROM has two distinct egg states:
+  //   1. Uninitialized: clock has never been set; the ROM is sitting on the
+  //      clock-setting screen. ALL time registers (0x10-0x15) are zero.
+  //   2. Initialized (incubating): clock is running; the egg will hatch on
+  //      its own. At least one time register is non-zero.
+  //
+  // Checking only seconds (0x10/0x11) is unreliable - they are legitimately
+  // zero at the start of every minute. We check all six BCD time registers.
+  // After hatchEgg() sets the time via NTP, at least one register will be
+  // non-zero, so all-zero is false and we stop trying to re-hatch.
+  // The eggInitiated flag is the primary guard against re-triggering; this
+  // check is only the initial trigger on a truly fresh start.
+  if (readMemory(0x5D) != 0) return false;  // not an egg at all
+  return readMemory(0x10) == 0 &&  // seconds ones
+         readMemory(0x11) == 0 &&  // seconds tens
+         readMemory(0x12) == 0 &&  // minutes ones
+         readMemory(0x13) == 0 &&  // minutes tens
+         readMemory(0x14) == 0 &&  // hours ones
+         readMemory(0x15) == 0;    // hours tens
 }
 bool isTamaEgg()
 {
@@ -85,7 +101,7 @@ bool isTamaEgg()
 
 bool isTamaDead()
 {
-  return false; // stub — not yet implemented
+  return false; // stub - not yet implemented
 }
 
 bool isTamaSleeping()
@@ -104,7 +120,7 @@ bool isTamaRequestingAttention()
 
 bool isTamaNeedingAttention()
 {
-  return false; // stub — not yet implemented
+  return false; // stub - not yet implemented
 }
 
 void feedTamaFood()
@@ -342,55 +358,58 @@ void cleanTamaPoop()
 }
 void hatchEgg()
 {
-    Serial.println("Hatching egg: opening clock-setting screen...");
     simulatingButtons = true;
     manualButtonControl = true;
 
-    // Press Middle to open clock-setting screen
+    // Let the ROM settle on the time-setting screen before touching anything
+    Serial.println("Hatch: waiting for ROM to settle...");
+    for (int i = 0; i < 2 * TIMER_1HZ_PERIOD; i++) {
+        tamalib_mainloop_step_by_step(false);
+    }
+
+    // Open the time-setting screen
+    Serial.println("Hatch: opening time-set screen...");
     hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
     for (int i = 0; i < 3000; i++) {
         tamalib_mainloop_step_by_step(false);
     }
     hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
-    for (int i = 0; i < 1500; i++) {
+    for (int i = 0; i < TIMER_1HZ_PERIOD; i++) {
         tamalib_mainloop_step_by_step(false);
     }
 
-    // Press Left to increment hour from 0 to 1 AM (avoids "can't set 0:00" restriction)
-    Serial.println("Hatching egg: incrementing hour...");
-    hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
-    for (int i = 0; i < 3000; i++) {
-        tamalib_mainloop_step_by_step(false);
-    }
-    hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
-    for (int i = 0; i < 1500; i++) {
+    // Write real NTP time directly into the ROM's time registers while the
+    // time-setting screen is open, so the ROM sees and commits the right time
+    Serial.println("Hatch: writing NTP time into registers...");
+    setTimeViaNTP();
+    for (int i = 0; i < TIMER_1HZ_PERIOD; i++) {
         tamalib_mainloop_step_by_step(false);
     }
 
-    // Press Right to confirm time and start the simulation
-    Serial.println("Hatching egg: confirming time...");
+    // Confirm the time to start the simulation
+    Serial.println("Hatch: confirming time to start simulation...");
     hw_set_button(BTN_RIGHT, BTN_STATE_PRESSED);
     for (int i = 0; i < 3000; i++) {
         tamalib_mainloop_step_by_step(false);
     }
     hw_set_button(BTN_RIGHT, BTN_STATE_RELEASED);
-    for (int i = 0; i < 1500; i++) {
+    for (int i = 0; i < TIMER_1HZ_PERIOD; i++) {
         tamalib_mainloop_step_by_step(false);
     }
 
-    // Press Middle to exit the time menu to the main simulation
-    Serial.println("Hatching egg: exiting time menu...");
+    // Close the time-set screen / return to main egg screen
+    Serial.println("Hatch: closing time-set screen...");
     hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
     for (int i = 0; i < 3000; i++) {
         tamalib_mainloop_step_by_step(false);
     }
     hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
-    for (int i = 0; i < 1500; i++) {
+    for (int i = 0; i < TIMER_1HZ_PERIOD; i++) {
         tamalib_mainloop_step_by_step(false);
     }
 
     manualButtonControl = false;
-    Serial.println("Egg hatched!");
+    Serial.println("Hatch: egg clock set. Incubation started - egg will hatch on its own.");
 }
 void checkTamaStats()
 {
@@ -569,11 +588,10 @@ void babysitterLoop()
     elapsed_check_ticks++;
     elapsed_time_check_ticks++;
 
-    if (isTamaUnstartedEgg()) {
+    if (!eggInitiated && isTamaUnstartedEgg()) {
         Serial.println("Unstarted egg detected, auto-hatching...");
         hatchEgg();
-        Serial.println("Setting time after hatch...");
-        setTimeViaNTP();
+        eggInitiated = true;
         return;
     }
 

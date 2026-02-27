@@ -7,7 +7,8 @@
       "Bash(where make:*)",
       "Bash(cmake:*)",
       "Bash(\"C:/Program Files \\(x86\\)/Microsoft Visual Studio/2019/BuildTools/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe\":*)",
-      "Bash(\"/c/Program Files \\(x86\\)/Microsoft Visual Studio/18/BuildTools/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe\":*)"
+      "Bash(\"/c/Program Files \\(x86\\)/Microsoft Visual Studio/18/BuildTools/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe\":*)",
+      "Bash(ls:*)"
     ]
   }
 }

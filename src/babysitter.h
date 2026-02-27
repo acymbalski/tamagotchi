@@ -51,6 +51,7 @@ void toggleLights();
 void setTime(tm time);
 bool setTimeViaNTP();
 
+void resetBabysitterState();
 void babysitterLoop();
 
 #endif // BABYSITTER_H

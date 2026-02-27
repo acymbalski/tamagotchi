@@ -165,6 +165,7 @@ static void perform_reset(void) {
     memset(matrix_buffer, 0, sizeof(matrix_buffer));
     memset(icon_buffer,   0, sizeof(icon_buffer));
     tamalib_reset();
+    resetBabysitterState();
     printf("[reset] Hard reset complete\n");
     fflush(stdout);
 }
