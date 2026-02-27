@@ -1,49 +1,59 @@
-<h3 align="center"> arduinogotchi - a real tamagotchi emulator for arduino uno </h3>
+# Tamagotchi
 
-> this repository is forked; this is my attempt to make tamagotchi with some minor changes
-> ### fork notice ( previous )
-> 
-> I did the following changes after forking [original repo](https://github.com/GaryZ88/ArduinoGotchi)
-> - Created a platformio project, so it is easy to target multiple platforms
-> - Created ports for ESP8266 and ESP32, mainly because speed on 8-bit AVR is just too slow
-> - Added long click on "back" button - if you press it for 5 seconds, it will reset memory back to egg state
-> - Added inverted Speaker connection setting. Mainly because the Piezo modules that I have are active on Low. Another reason is mentioned below.
-> 
-> I personally assembled the ESP8266 version with Wemos D1 Mini on perf board, using built-in LED together with speaker, so when it sounds, LED is blinking as well.
+A Tamagotchi P1 emulator for ESP32, extended with an autonomous babysitter AI and a PC simulator for development.
 
-### fork notice
+The emulation core is [TamaLib](https://github.com/jcrona/tamalib) by Jean-Christophe Rona. This project builds on two prior forks ([GaryZ88/ArduinoGotchi](https://github.com/GaryZ88/ArduinoGotchi), [anabolyc/Tamagotchi](https://github.com/anabolyc/Tamagotchi)) which added ESP32 support and PlatformIO packaging.
 
-I did the following changes after forking [above forked repo](https://github.com/anabolyc/Tamagotchi)
-- Removed `esp8266-space-invaders` from `firmware`
-- Rearranged directories
-- Created a casing for the hardware
+## What this fork adds
 
-### synopsis
+**Babysitter AI** (`src/babysitter.cpp`) — monitors the tama's internal memory state and automatically issues button presses to feed it, play games, clean poop, give medicine, and toggle lights. Three modes:
+- `PROACTIVE` — acts without being asked
+- `REACTIVE` — acts only when the creature signals distress
+- `INACTIVE` — does nothing
 
-**ArduinoGotchi** is a real [Tamagotchi P1](https://tamagotchi.fandom.com/wiki/Tamagotchi_(1996_Pet)) emulator running in Arduino UNO hardware. The emulation core is based on [TamaLib](https://github.com/jcrona/tamalib) with intensive optimization to make it fit into UNO's hardware that only comes with 32K Flash 2K RAM.
+**WiFi / NTP sync** — connects to a configured network and syncs the emulator's clock to real time via NTP.
 
-![Tamagotchi P1 Actual Devices](images/TamaP1_devices.jpg)
+**Serial command interface** — send commands over the serial monitor to read/write memory, step the CPU, press buttons, dump state, adjust emulation speed, and more.
 
-## How to build and run
+**PC simulator** (`pc/`) — compiles the same emulator and babysitter code to a native Windows executable using SDL2. Keyboard input replaces physical buttons. Useful for rapid iteration without flashing hardware. See `pc/README.md` for build instructions.
 
-Use Platformio. Run `build` task to build for all platforms. Next, run the `Upload` task for a specific platform
+## Hardware (ESP32)
 
-### Additional notes
-- To activate your pet, you have to configure the clock by pressing the middle button. Otherwise, your pet will not be alive.
-- The emulator will save the game status every 5 minutes. You can change that by changing the AUTO_SAVE_MINUTES setting
-- The speed of the emulator is a bit slower than the actual Tamagotchi device on AVR, still, it is fun. On ESPs it runs smoothly.
-- There are a few costs in the `platformio.ini` that you can adjust to fit your needs:
-```
-  -D DISPLAY_I2C_ADDRESS=0x3C
-  -D SCREEN_WIDTH=128
-  -D SCREEN_HEIGHT=64
-  -D ENABLE_TAMA_SOUND
-  -D ENABLE_TAMA_SOUND_ACTIVE_LOW
-  -D ENABLE_AUTO_SAVE_STATUS
-  -D ENABLE_LOAD_STATE_FROM_EEPROM
+- ESP32 board (tested: `esp32dev`, `nodemcu-32s`, `heltec_wifi_lora_32_V3`)
+- SSD1306 128x64 OLED display (I2C)
+- Three momentary push buttons (left, middle, right)
+- Optional piezo buzzer
+
+## Building for ESP32
+
+Uses [PlatformIO](https://platformio.org). Open the project in VS Code with the PlatformIO extension, or use the CLI:
+
+```sh
+pio run -e esp32          # build
+pio run -e esp32 -t upload # flash
+pio device monitor         # serial output
 ```
 
-> ### license
-> ArduinoGotchi is distributed under the GPLv2 license. See the LICENSE file for more information.
-> ### where to buy
-> You may support my work by ordering the kit on [Tindie](https://www.tindie.com/products/sonocotta/esp8266-tamagotchi-diy-kit/) or [Elecrow](https://www.elecrow.com/esp8266-tamagotchi-diy-kit.html)
+Available environments: `esp32`, `nodemcu-32s`, `heltec_wifi_lora_32_V3`.
+
+## Configuration
+
+Copy `src/wifi_config.h.sample` to `src/wifi_config.h` and fill in your network credentials for WiFi/NTP support.
+
+Notable `platformio.ini` flags:
+
+| Flag | Effect |
+|------|--------|
+| `ENABLE_AUTO_SAVE_STATUS` | Save state to EEPROM periodically |
+| `ENABLE_LOAD_STATE_FROM_EEPROM` | Restore state on boot |
+| `AUTO_SAVE_MINUTES` | Autosave interval (default 2) |
+| `ENABLE_TAMA_SOUND` | Enable buzzer output |
+| `TAMA_DISPLAY_FRAMERATE` | LCD refresh rate |
+
+## PC Simulator
+
+See [`pc/README.md`](pc/README.md).
+
+## License
+
+GPLv2. See `LICENSE`.
