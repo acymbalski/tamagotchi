@@ -11,3 +11,4 @@
 
 void pc_save_state(cpu_state_t *state);
 bool pc_load_state(cpu_state_t *state);
+void pc_delete_save(void);

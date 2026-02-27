@@ -342,7 +342,55 @@ void cleanTamaPoop()
 }
 void hatchEgg()
 {
+    Serial.println("Hatching egg: opening clock-setting screen...");
+    simulatingButtons = true;
+    manualButtonControl = true;
 
+    // Press Middle to open clock-setting screen
+    hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+    for (int i = 0; i < 3000; i++) {
+        tamalib_mainloop_step_by_step(false);
+    }
+    hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+    for (int i = 0; i < 1500; i++) {
+        tamalib_mainloop_step_by_step(false);
+    }
+
+    // Press Left to increment hour from 0 to 1 AM (avoids "can't set 0:00" restriction)
+    Serial.println("Hatching egg: incrementing hour...");
+    hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
+    for (int i = 0; i < 3000; i++) {
+        tamalib_mainloop_step_by_step(false);
+    }
+    hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
+    for (int i = 0; i < 1500; i++) {
+        tamalib_mainloop_step_by_step(false);
+    }
+
+    // Press Right to confirm time and start the simulation
+    Serial.println("Hatching egg: confirming time...");
+    hw_set_button(BTN_RIGHT, BTN_STATE_PRESSED);
+    for (int i = 0; i < 3000; i++) {
+        tamalib_mainloop_step_by_step(false);
+    }
+    hw_set_button(BTN_RIGHT, BTN_STATE_RELEASED);
+    for (int i = 0; i < 1500; i++) {
+        tamalib_mainloop_step_by_step(false);
+    }
+
+    // Press Middle to exit the time menu to the main simulation
+    Serial.println("Hatching egg: exiting time menu...");
+    hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+    for (int i = 0; i < 3000; i++) {
+        tamalib_mainloop_step_by_step(false);
+    }
+    hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+    for (int i = 0; i < 1500; i++) {
+        tamalib_mainloop_step_by_step(false);
+    }
+
+    manualButtonControl = false;
+    Serial.println("Egg hatched!");
 }
 void checkTamaStats()
 {
@@ -521,6 +569,11 @@ void babysitterLoop()
     elapsed_check_ticks++;
     elapsed_time_check_ticks++;
 
+    if (isTamaUnstartedEgg()) {
+        Serial.println("Unstarted egg detected, auto-hatching...");
+        hatchEgg();
+        return;
+    }
 
     if (elapsed_time_check_ticks >= ticks_between_time_checks)
     {

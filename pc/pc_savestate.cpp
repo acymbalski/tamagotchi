@@ -67,3 +67,12 @@ bool pc_load_state(cpu_state_t *state) {
     fflush(stdout);
     return true;
 }
+
+void pc_delete_save(void) {
+    if (remove(SAVE_FILENAME) == 0) {
+        printf("[savestate] Save file deleted (%s)\n", SAVE_FILENAME);
+    } else {
+        printf("[savestate] No save file to delete (%s)\n", SAVE_FILENAME);
+    }
+    fflush(stdout);
+}

@@ -41,6 +41,7 @@ uint8_t getTamaHappiness();
 uint8_t getTamaPoop();
 bool isTamaSick();
 
+void hatchEgg();
 void feedTamaFood();
 void feedTamaSnack();
 void playTamaGame();

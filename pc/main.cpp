@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <string.h>
 
 #include "tamalib.h"
 #include "hw.h"
@@ -158,6 +159,16 @@ static void hal_update_screen(void) {
     SDL_RenderPresent(renderer);
 }
 
+/* ---- Reset ---- */
+static void perform_reset(void) {
+    pc_delete_save();
+    memset(matrix_buffer, 0, sizeof(matrix_buffer));
+    memset(icon_buffer,   0, sizeof(icon_buffer));
+    tamalib_reset();
+    printf("[reset] Hard reset complete\n");
+    fflush(stdout);
+}
+
 /* ---- Event handler ---- */
 static int hal_handler(void) {
     SDL_Event event;
@@ -207,6 +218,10 @@ static int hal_handler(void) {
 
             case SDLK_s:
                 pc_save_state(&cpuState);
+                break;
+
+            case SDLK_r:
+                perform_reset();
                 break;
 
             default:
@@ -307,7 +322,7 @@ int main(int argc, char **argv) {
 
     lastSaveMs = SDL_GetTicks64();
 
-    printf("[pc] Running. Keys: arrows/ZXC=buttons, F=speed, S=save, Esc=quit\n");
+    printf("[pc] Running. Keys: arrows/ZXC=buttons, F=speed, S=save, R=reset, Esc=quit\n");
     fflush(stdout);
 
     while (!exitRequested) {
