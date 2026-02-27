@@ -591,6 +591,9 @@ void babysitterLoop()
     {
         elapsed_check_ticks-= ticks_between_checks;
 
+        if (isTamaEgg())
+            return;
+
         if (currentIntent == PROACTIVE)
         {
             // take care of the tama
