@@ -123,196 +123,107 @@ bool isTamaNeedingAttention()
   return false; // stub - not yet implemented
 }
 
+/* ---- Automation helpers ---- */
+
+// Runs emulator steps until condition() returns true or maxCycles is exceeded.
+// Logs a warning on timeout. The emulator advances regardless, so this
+// replaces fixed-cycle wait loops while also verifying expected state.
+template<typename Pred>
+static bool waitFor(Pred condition, uint32_t maxCycles, const char *description) {
+    for (uint32_t i = 0; i < maxCycles; i++) {
+        tamalib_mainloop_step_by_step(false);
+        if (condition()) return true;
+    }
+    Serial.print("WARNING: timed out waiting for: ");
+    Serial.println(description);
+    return false;
+}
+
+/* ---- Babysitter actions ---- */
+
 void feedTamaFood()
 {
-  // set menu selection to food
-  Serial.println("Selecting food menu...");
-  setMemory(0x75, 0x01);
-  for (int i = 0; i < 1500; i++) {
-    tamalib_mainloop_step_by_step(false);
-  }
-  // press select button for 1500 cycles to open menu
-  hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
-
-  simulatingButtons = true;
-  manualButtonControl = true;
-
-  Serial.println("Opening food menu...");
-  // cycle to wait for menu to be clicked
-  for (int i = 0; i < 3000; i++) {
-    tamalib_mainloop_step_by_step(false);
-  }
-  hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
-
-  Serial.println("Waiting for food menu to open...");
-  // wait for menu to open
-  for (int i = 0; i < 1500; i++) {
-    tamalib_mainloop_step_by_step(false);
-  }
-
-  // TODO: check if tama refuses, maybe return False
-
-  // select food
-  hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
-  Serial.println("Selecting food...");
-  // wait for tama to finish eating
-  for (int i = 0; i < 33000; i++) {
-    tamalib_mainloop_step_by_step(false);
-  }
-  // release button
-  hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
-  Serial.println("Food selected, tama has eaten.");
-
-  for (int i = 0; i < 1500; i++) {
-    tamalib_mainloop_step_by_step(false);
-  }
-  // we're done, press exit button to close menu
-  pressRightButton();
-  Serial.println("Exiting food menu...");
-  manualButtonControl = false;
-  
-  setMemory(0x75, 0x00);
-}
-void feedTamaSnack()
-{
-  // set menu selection to food
-  Serial.println("Selecting food menu...");
-  setMemory(0x75, 0x01);
-  for (int i = 0; i < 1500; i++) {
-    tamalib_mainloop_step_by_step(false);
-  }
-  // press select button for 1500 cycles to open menu
-  hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
-
-  simulatingButtons = true;
-  manualButtonControl = true;
-
-  Serial.println("Opening food menu...");
-  // cycle to wait for menu to be clicked
-  for (int i = 0; i < 3000; i++) {
-    tamalib_mainloop_step_by_step(false);
-  }
-  hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
-
-  Serial.println("Waiting for food menu to open...");
-  // wait for menu to open
-  for (int i = 0; i < 1500; i++) {
-    tamalib_mainloop_step_by_step(false);
-  }
-
-  // select snack
-  hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
-  for (int i = 0; i < 1500; i++) {
-    tamalib_mainloop_step_by_step(false);
-  }
-  hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
-
-  hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
-  Serial.println("Selecting snack...");
-  // wait for tama to finish eating
-  for (int i = 0; i < 33000; i++) {
-    tamalib_mainloop_step_by_step(false);
-  }
-  // release button
-  hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
-  Serial.println("Food selected, tama has eaten.");
-
-  for (int i = 0; i < 1500; i++) {
-    tamalib_mainloop_step_by_step(false);
-  }
-  // we're done, press exit button to close menu
-  pressRightButton();
-  Serial.println("Exiting food menu...");
-  manualButtonControl = false;
-
-  setMemory(0x75, 0x00);
-}
-void giveTamaMedicine()
-{
-    // set menu selection to cleaning
-    Serial.println("Selecting medicine menu...");
-    setMemory(MEM_LOC_MENU, MENU_MEDICINE);
-    for (int i = 0; i < 1500; i++) {
-        tamalib_mainloop_step_by_step(false);
-    }
-    // press select button for 1500 cycles to open menu
+    Serial.println("Selecting food menu...");
+    setMemory(MEM_LOC_MENU, MENU_FOOD);
+    for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
-
     simulatingButtons = true;
     manualButtonControl = true;
-
-    // cycle to wait for menu to be clicked
-    for (int i = 0; i < 3000; i++)
-    {
-        tamalib_mainloop_step_by_step(false);
-    }
+    for (int i = 0; i < 3000; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
-    
+    for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
+    hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+    for (int i = 0; i < 33000; i++) tamalib_mainloop_step_by_step(false);
+    hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+    for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
+    pressRightButton();
+    manualButtonControl = false;
     setMemory(MEM_LOC_MENU, MENU_NONE);
 }
+
+void feedTamaSnack()
+{
+    Serial.println("Selecting food menu for snack...");
+    setMemory(MEM_LOC_MENU, MENU_FOOD);
+    for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
+    hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+    simulatingButtons = true;
+    manualButtonControl = true;
+    for (int i = 0; i < 3000; i++) tamalib_mainloop_step_by_step(false);
+    hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+    for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
+    hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
+    for (int i = 0; i < 3000; i++) tamalib_mainloop_step_by_step(false);
+    hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
+    for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
+    hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+    for (int i = 0; i < 33000; i++) tamalib_mainloop_step_by_step(false);
+    hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+    for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
+    pressRightButton();
+    manualButtonControl = false;
+    setMemory(MEM_LOC_MENU, MENU_NONE);
+}
+
+void giveTamaMedicine()
+{
+    Serial.println("Selecting medicine menu...");
+    setMemory(MEM_LOC_MENU, MENU_MEDICINE);
+    for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
+    hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+    simulatingButtons = true;
+    manualButtonControl = true;
+    for (int i = 0; i < 3000; i++) tamalib_mainloop_step_by_step(false);
+    hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+    for (int i = 0; i < 33000; i++) tamalib_mainloop_step_by_step(false);
+    manualButtonControl = false;
+    setMemory(MEM_LOC_MENU, MENU_NONE);
+}
+
 void playTamaGame()
 {
-  // set menu selection to food
-  Serial.println("Selecting game menu...");
-  setMemory(MEM_LOC_MENU, MENU_GAME);
-  for (int i = 0; i < 3000; i++) {
-    tamalib_mainloop_step_by_step(false);
-  }
-  hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+    Serial.println("Selecting game menu...");
+    setMemory(MEM_LOC_MENU, MENU_GAME);
+    for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
+    hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+    simulatingButtons = true;
+    manualButtonControl = true;
+    for (int i = 0; i < 3000; i++) tamalib_mainloop_step_by_step(false);
+    hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+    for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
 
-  simulatingButtons = true;
-  manualButtonControl = true;
-
-  Serial.println("Opening game menu...");
-  // cycle to wait for menu to be clicked
-  for (int i = 0; i < 3000; i++) {
-    tamalib_mainloop_step_by_step(false);
-  }
-  hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
-
-  Serial.println("Waiting for game menu to open...");
-  // wait for menu to open
-  for (int i = 0; i < 15000; i++) {
-    tamalib_mainloop_step_by_step(false);
-  }
-
-  // TODO: check if tama refuses, maybe return False
-
-  // loop five times
-  for (int i = 0; i < 5; i++)
-  {
-    // will we succeed or fail?
-    // get mem loc 0x84. If 8, we will succeed
-    //bool_t will_succeed = (readMemory(0x84) == 0x08);
-    // randomly decide... should we win?
-    // or... force a win
-    setMemory(0x84, 0x08); // force a win
-
-    // press left or middle randomly
-    // (not random for now)
-    hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
-    for (int i = 0; i < 42000; i++)
+    for (int i = 0; i < 5; i++)
     {
-        tamalib_mainloop_step_by_step(false);
+        setMemory(0x84, 0x08); // force a win
+        hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
+        for (int j = 0; j < 42000; j++) tamalib_mainloop_step_by_step(false);
+        hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
+        for (int j = 0; j < 3000; j++) tamalib_mainloop_step_by_step(false);
     }
-    hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
-    
-    for (int i = 0; i < 3000; i++)
-    {
-        tamalib_mainloop_step_by_step(false);
-    }
-  }
 
-
-  for (int i = 0; i < 30000; i++) {
-    tamalib_mainloop_step_by_step(false);
-  }
-
-  // we're done!
-  manualButtonControl = false;
-  
-  setMemory(MEM_LOC_MENU, MENU_NONE); // reset menu selection to none
-  Serial.println("Exiting game...");
+    manualButtonControl = false;
+    setMemory(MEM_LOC_MENU, MENU_NONE);
+    Serial.println("Exiting game...");
 }
 void toggleLights()
 {
@@ -336,77 +247,61 @@ void disciplineTama()
 }
 void cleanTamaPoop()
 {
-    // set menu selection to cleaning
-    Serial.println("Selecting cleaning menu...");
+    Serial.println("Selecting clean menu...");
     setMemory(MEM_LOC_MENU, MENU_CLEAN);
-    for (int i = 0; i < 1500; i++) {
-        tamalib_mainloop_step_by_step(false);
-    }
-    // press select button for 1500 cycles to open menu
+    for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
-
     simulatingButtons = true;
     manualButtonControl = true;
-
-    // cycle to wait for menu to be clicked
-    for (int i = 0; i < 3000; i++)
-    {
-        tamalib_mainloop_step_by_step(false);
-    }
+    for (int i = 0; i < 3000; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
-
+    for (int i = 0; i < 33000; i++) tamalib_mainloop_step_by_step(false);
+    manualButtonControl = false;
+    setMemory(MEM_LOC_MENU, MENU_NONE);
 }
+
 void hatchEgg()
 {
     simulatingButtons = true;
     manualButtonControl = true;
 
-    // Let the ROM settle on the time-setting screen before touching anything
+    // The time-set screen has a blinking cursor — screenChanged() fires on
+    // every blink, not on actual navigation. Use fixed waits here so button
+    // presses land at the right time regardless of animation phase.
+
+    // Let the ROM fully settle on the time-set screen before touching anything
     Serial.println("Hatch: waiting for ROM to settle...");
-    for (int i = 0; i < 2 * TIMER_1HZ_PERIOD; i++) {
-        tamalib_mainloop_step_by_step(false);
-    }
+    for (int i = 0; i < 2 * TIMER_1HZ_PERIOD; i++) tamalib_mainloop_step_by_step(false);
 
     // Open the time-setting screen
     Serial.println("Hatch: opening time-set screen...");
     hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
-    for (int i = 0; i < 3000; i++) {
-        tamalib_mainloop_step_by_step(false);
-    }
+    for (int i = 0; i < 3000; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
-    for (int i = 0; i < TIMER_1HZ_PERIOD; i++) {
-        tamalib_mainloop_step_by_step(false);
-    }
+    for (int i = 0; i < TIMER_1HZ_PERIOD; i++) tamalib_mainloop_step_by_step(false);
 
-    // Write real NTP time directly into the ROM's time registers while the
-    // time-setting screen is open, so the ROM sees and commits the right time
+    // Write NTP time directly into registers while the time-set screen is open
     Serial.println("Hatch: writing NTP time into registers...");
     setTimeViaNTP();
-    for (int i = 0; i < TIMER_1HZ_PERIOD; i++) {
-        tamalib_mainloop_step_by_step(false);
-    }
+    waitFor([](){
+        return readMemory(0x10) != 0 || readMemory(0x11) != 0 ||
+               readMemory(0x12) != 0 || readMemory(0x13) != 0 ||
+               readMemory(0x14) != 0 || readMemory(0x15) != 0;
+    }, TIMER_1HZ_PERIOD, "time registers non-zero after NTP write");
 
     // Confirm the time to start the simulation
     Serial.println("Hatch: confirming time to start simulation...");
     hw_set_button(BTN_RIGHT, BTN_STATE_PRESSED);
-    for (int i = 0; i < 3000; i++) {
-        tamalib_mainloop_step_by_step(false);
-    }
+    for (int i = 0; i < 3000; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_RIGHT, BTN_STATE_RELEASED);
-    for (int i = 0; i < TIMER_1HZ_PERIOD; i++) {
-        tamalib_mainloop_step_by_step(false);
-    }
+    for (int i = 0; i < TIMER_1HZ_PERIOD; i++) tamalib_mainloop_step_by_step(false);
 
     // Close the time-set screen / return to main egg screen
     Serial.println("Hatch: closing time-set screen...");
     hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
-    for (int i = 0; i < 3000; i++) {
-        tamalib_mainloop_step_by_step(false);
-    }
+    for (int i = 0; i < 3000; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
-    for (int i = 0; i < TIMER_1HZ_PERIOD; i++) {
-        tamalib_mainloop_step_by_step(false);
-    }
+    for (int i = 0; i < TIMER_1HZ_PERIOD; i++) tamalib_mainloop_step_by_step(false);
 
     manualButtonControl = false;
     Serial.println("Hatch: egg clock set. Incubation started - egg will hatch on its own.");

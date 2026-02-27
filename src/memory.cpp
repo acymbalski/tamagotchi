@@ -6,7 +6,7 @@
 uint8_t readMemory(uint16_t address)
 {
   cpu_get_state(&cpuState);
-  if (address < MEMORY_SIZE)
+  if (address < MEMORY_SIZE * 2)  // MEMORY_SIZE is bytes; addresses are nibbles
   {
     uint16_t original_address = address;
     // take memory address and divide it by two
@@ -39,7 +39,7 @@ void setMemory(uint16_t address, uint8_t value)
 
   cpu_get_state(&cpuState);
 
-  if (address < MEMORY_SIZE)
+  if (address < MEMORY_SIZE * 2)  // MEMORY_SIZE is bytes; addresses are nibbles
   {
     uint16_t original_address = address;
 
