@@ -3,3 +3,6 @@
 src/wifi_config.h
 pc/build/
 .claude/
+captures/
+annotations.json
+tama_save.bin

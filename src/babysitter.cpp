@@ -20,6 +20,7 @@ Can be set to PROACTIVE, REACTIVE, or INACTIVE
 #include "tamalib.h"
 
 BabysitterMode currentIntent = INTENT;
+bool ntpDisabled = false;
 
 static uint32_t elapsed_check_ticks = 0; // ticks since last babysitter check
 static uint32_t elapsed_time_check_ticks = 0; // ticks since last time check
@@ -477,20 +478,22 @@ bool setTimeViaNTP()
 
 void babysitterLoop()
 {
+    if (currentIntent == INACTIVE) return;
+
     // this loop is called TIMER_1HZ_PERIOD per second
     // we will use ticks instead of actual seconds in case we are not emulating
     // at realtime
     elapsed_check_ticks++;
     elapsed_time_check_ticks++;
 
-    if (!eggInitiated && isTamaUnstartedEgg()) {
+    if (!ntpDisabled && !eggInitiated && isTamaUnstartedEgg()) {
         Serial.println("Unstarted egg detected, auto-hatching...");
         hatchEgg();
         eggInitiated = true;
         return;
     }
 
-    if (elapsed_time_check_ticks >= ticks_between_time_checks)
+    if (!ntpDisabled && elapsed_time_check_ticks >= ticks_between_time_checks)
     {
         elapsed_time_check_ticks -= ticks_between_time_checks;
 

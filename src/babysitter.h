@@ -31,6 +31,7 @@ typedef enum {
 #define RESPONSIVENESS 1 // how many seconds between each babysitter check
 
 extern BabysitterMode currentIntent;
+extern bool ntpDisabled;
 
 bool isTamaUnstartedEgg();
 bool isTamaEgg();

@@ -6,12 +6,12 @@
 #define SAVE_MAGIC    0x12
 #define SAVE_FILENAME "tama_save.bin"
 
-void pc_save_state(cpu_state_t *state) {
+void pc_save_state_to_file(cpu_state_t *state, const char *filename) {
     cpu_get_state(state);
 
-    FILE *f = fopen(SAVE_FILENAME, "wb");
+    FILE *f = fopen(filename, "wb");
     if (!f) {
-        fprintf(stderr, "[savestate] Failed to open %s for writing\n", SAVE_FILENAME);
+        fprintf(stderr, "[savestate] Failed to open %s for writing\n", filename);
         return;
     }
 
@@ -26,14 +26,18 @@ void pc_save_state(cpu_state_t *state) {
     fwrite(state->memory, sizeof(u4_t), MEMORY_SIZE, f);
 
     fclose(f);
-    printf("[savestate] State saved to %s\n", SAVE_FILENAME);
+    printf("[savestate] State saved to %s\n", filename);
     fflush(stdout);
 }
 
-bool pc_load_state(cpu_state_t *state) {
-    FILE *f = fopen(SAVE_FILENAME, "rb");
+void pc_save_state(cpu_state_t *state) {
+    pc_save_state_to_file(state, SAVE_FILENAME);
+}
+
+bool pc_load_state_from_file(cpu_state_t *state, const char *filename) {
+    FILE *f = fopen(filename, "rb");
     if (!f) {
-        printf("[savestate] No save file found (%s)\n", SAVE_FILENAME);
+        printf("[savestate] No save file found (%s)\n", filename);
         fflush(stdout);
         return false;
     }
@@ -41,7 +45,7 @@ bool pc_load_state(cpu_state_t *state) {
     uint8_t magic = 0;
     fread(&magic, 1, 1, f);
     if (magic != SAVE_MAGIC) {
-        fprintf(stderr, "[savestate] Bad magic 0x%02X in %s, skipping\n", magic, SAVE_FILENAME);
+        fprintf(stderr, "[savestate] Bad magic 0x%02X in %s, skipping\n", magic, filename);
         fclose(f);
         return false;
     }
@@ -63,9 +67,13 @@ bool pc_load_state(cpu_state_t *state) {
 
     cpu_set_state(state);
 
-    printf("[savestate] State loaded from %s\n", SAVE_FILENAME);
+    printf("[savestate] State loaded from %s\n", filename);
     fflush(stdout);
     return true;
+}
+
+bool pc_load_state(cpu_state_t *state) {
+    return pc_load_state_from_file(state, SAVE_FILENAME);
 }
 
 void pc_delete_save(void) {
