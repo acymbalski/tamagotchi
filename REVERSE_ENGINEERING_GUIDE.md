@@ -71,3 +71,68 @@ This document provides instructions for using the Tamagotchi Investigation Lab (
 
 ## 5. Maintenance
 After updating `memory_config.py`, click **"Rebuild Assumptions (All)"** in TIL to re-process existing captures with the new logic. Use `ninja` in `pc/build` to rebuild the C++ sim if you change any `MEM_LOC_` defines in `babysitter.h`.
+
+---
+
+## 6. Field-by-Field Analysis Strategy
+
+This section documents the canonical methodology for identifying an unknown memory address for a specific field. The implementation lives in `analyzer.py` and is invoked with `python analyzer.py --field <attr>`.
+
+### 6.1 Core Method — Value-Grouping with Cross-Validation
+
+For a field `F` with observed truth values `{v0, v1, …}`:
+
+#### Step A — Within-Group Stacking
+
+- Collect all captures where `truth[F] == v`.
+- For every nibble address, record the observed nibble across all captures in the group.
+- An address is *group-consistent* for value `v` if every capture in that group shows the **same nibble value** at that address.
+- `consistent[v] = { addr → nibble_value }`
+
+#### Step B — Cross-Group Contrast
+
+- Intersect consistent addresses across all value groups → candidate addresses seen in every group.
+- At each candidate, the nibble values across groups should be **different** (otherwise it's a constant unrelated to the field). Discard candidates where all groups agree on the same nibble.
+- For ordinal fields (hunger 0–4), check that the nibble values form a **monotonic sequence** across the ordered values — this is strong confirmatory evidence.
+- **Multi-nibble fields (BCD, byte): use address-pair units.** For fields like Weight encoded as a two-nibble BCD pair, contrast must be evaluated at the *decoded level*, not per-nibble. Example: weight=5 → (tens=0, ones=5), weight=6 → (tens=0, ones=6). The tens nibble is 0 in both groups — it would be incorrectly disqualified by a raw-nibble contrast check. Instead, track candidate address *pairs* as a single unit and check that the decoded BCD value differs across groups. Only discard a BCD pair if its decoded value is identical across all truth groups with enough distinct truth values to produce different tens digits. When truth values don't span enough range to exercise all nibbles of a pair, assign *partial confidence* rather than disqualifying.
+
+#### Step C — Disqualification / Doubt Assignment
+
+- If a candidate passes all groups except one, assign *partial doubt* rather than full rejection — the outlier group may contain a mis-annotated snapshot (natural value decay during "Investigate Live" is a common source).
+- Track: `confidence = groups_consistent / groups_with_≥2_captures`.
+- 100% → strong candidate; ≥80% → plausible; <80% → doubted.
+
+#### Step D — Annotation-Error Tolerance
+
+- Allow **one outlier per group** before failing it. If 7/8 captures agree and 1 disagrees, mark that single snapshot as a suspected annotation error rather than discarding the address.
+- Always document the exception with the snapshot name so it can be re-verified.
+
+---
+
+### 6.2 Additional Methods
+
+**A. Invariant Elimination**
+- Find all addresses whose nibble value **never changes** across all captures.
+- These are ROM constants or persistent flags — exclude them first to shrink the search space.
+
+**B. Delta / Change Analysis**
+- Find consecutive capture pairs where only ONE truth field changed (e.g., hunger 4→3).
+- The set of RAM nibble addresses that changed between those two captures are prime candidates for that field.
+- Most powerful when paired with value-grouping: the delta narrows candidates before stacking.
+
+**C. Monotonicity / Correlation Check**
+- For numeric fields (hunger, happy, age, weight), compute the rank-correlation between `nibble_value(addr)` and `truth_value` across all captures.
+- High correlation (|r| > 0.85) is strong evidence. Inverse correlation is fine — the address might count *down* as the field goes *up*.
+
+**D. Unique-Value Count Pruning**
+- Hunger has at most 5 distinct values (0–4). An address showing 10+ distinct nibble values across captures cannot be a simple hunger register. Prune early.
+
+**E. Cross-Field Exclusion**
+- Once an address is confirmed for field A, mark it "claimed" and exclude it from future candidate sets for other fields. This speeds searches and avoids false re-discovery.
+
+**F. Category Enumeration (Stage / Screen)**
+- For categorical fields, each category maps to one expected nibble value. Collect all captures per category, apply within-group stacking (Step A), then verify the nibble values differ across categories. Since categories are discrete and few (≤5), even 2–3 captures per category is often sufficient.
+- Stage identification priority: we have Baby, Child, Angel captures — stack each, then contrast.
+
+**G. Temporal Drift Awareness**
+- Captures taken seconds apart should have near-identical truth values. Captures from different sessions may have drifted. When assessing annotation errors, check if the outlier snapshot is isolated in time — if so, drift is the likely culprit, not a bad memory address.
