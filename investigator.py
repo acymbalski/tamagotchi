@@ -177,6 +177,12 @@ class Investigator(QMainWindow):
         self.capture_count_label = QLabel("Captures: 0")
         self.status_bar.addPermanentWidget(self.capture_count_label)
 
+        # Connect signals for real-time highlighting
+        for edit in [self.edit_age, self.edit_weight, self.edit_discipline, self.edit_hunger, self.edit_happy, self.edit_poop]:
+            edit.textChanged.connect(self.highlight_discrepancies)
+        for combo in [self.combo_attention, self.combo_sick, self.combo_sleeping]:
+            combo.currentIndexChanged.connect(self.highlight_discrepancies)
+
     def load_annotations(self):
         if os.path.exists(ANNOTATIONS_FILE):
             try:
@@ -240,6 +246,30 @@ class Investigator(QMainWindow):
             self.image_label.setPixmap(pixmap.scaled(self.image_label.size(), Qt.AspectRatioMode.KeepAspectRatio))
             
             self.load_snapshot_data(name)
+
+    def highlight_discrepancies(self):
+        pre = self.pre_populated_values
+        if not pre: return
+
+        def set_style(widget, key, current_val):
+            guess = pre.get(key)
+            if current_val != guess:
+                widget.setStyleSheet("border: 2px solid red; background-color: #fff0f0;")
+            else:
+                widget.setStyleSheet("")
+
+        # Check each field
+        set_style(self.edit_age, "age", int(self.edit_age.text()) if self.edit_age.text().isdigit() else None)
+        set_style(self.edit_weight, "weight", int(self.edit_weight.text()) if self.edit_weight.text().isdigit() else None)
+        set_style(self.edit_discipline, "discipline", int(self.edit_discipline.text()) if self.edit_discipline.text().isdigit() else None)
+        set_style(self.edit_hunger, "hunger", int(self.edit_hunger.text()) if self.edit_hunger.text().isdigit() else None)
+        set_style(self.edit_happy, "happy", int(self.edit_happy.text()) if self.edit_happy.text().isdigit() else None)
+        set_style(self.edit_poop, "poop", int(self.edit_poop.text()) if self.edit_poop.text().isdigit() else None)
+        
+        # Combos
+        set_style(self.combo_attention, "attention", self.combo_attention.currentText() == "Yes")
+        set_style(self.combo_sick, "sick", self.combo_sick.currentText() == "Yes")
+        set_style(self.combo_sleeping, "sleeping", self.combo_sleeping.currentText() == "Yes")
 
     def load_snapshot_data(self, name):
         # Reset fields
@@ -338,6 +368,8 @@ class Investigator(QMainWindow):
             self.text_notes.setPlainText(entry.get("notes", ""))
         else:
             print(f"[debug] No existing annotation for {name}, using fresh guesses.")
+        
+        self.highlight_discrepancies()
 
     def save_and_next(self):
         # Close any open sim windows
