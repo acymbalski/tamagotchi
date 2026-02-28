@@ -162,10 +162,8 @@ static const float speedValues[] = {1.0f, 10.0f, 0.0f};
 
 /* ---- BMP Export ---- */
 static void save_bmp(const char *filename) {
-    // 32x16 1-bit BMP is tiny, but for compatibility we'll write a simple 24-bit BMP
-    // (Python can read anything, but 24-bit is easiest to write without bit-packing)
     uint32_t width = LCD_WIDTH;
-    uint32_t height = LCD_HEIGHT;
+    uint32_t height = LCD_HEIGHT + 6; // 16 LCD + 2 Gap + 4 Icons
     uint32_t rowSize = (width * 3 + 3) & ~3;
     uint32_t size = 54 + rowSize * height;
 
@@ -183,7 +181,9 @@ static void save_bmp(const char *filename) {
     fwrite(header, 1, 54, f);
 
     unsigned char *pixels = (unsigned char *)calloc(rowSize, height);
-    for (int y = 0; y < height; y++) {
+    
+    // Draw LCD Matrix
+    for (int y = 0; rowSize && y < LCD_HEIGHT; y++) {
         for (int x = 0; x < width; x++) {
             uint8_t mask = 0x80 >> (x % 8);
             bool on = (matrix_buffer[y][x / 8] & mask) != 0;
@@ -200,6 +200,38 @@ static void save_bmp(const char *filename) {
             }
         }
     }
+
+    // Draw Gap (Rows 16-17) - Dark Grey
+    for (int y = LCD_HEIGHT; y < LCD_HEIGHT + 2; y++) {
+        int py = height - 1 - y;
+        for (int x = 0; x < width; x++) {
+            pixels[py * rowSize + x * 3 + 0] = 40;
+            pixels[py * rowSize + x * 3 + 1] = 40;
+            pixels[py * rowSize + x * 3 + 2] = 40;
+        }
+    }
+
+    // Draw Icons (Rows 18-21)
+    // 8 icons, each 4 pixels wide
+    for (int i = 0; i < ICON_NUM; i++) {
+        bool on = icon_buffer[i];
+        for (int y = LCD_HEIGHT + 2; y < height; y++) {
+            int py = height - 1 - y;
+            for (int ix = 0; ix < 4; ix++) {
+                int px = (i * 4 + ix) * 3;
+                if (on) {
+                    pixels[py * rowSize + px + 0] = 255; // Blue
+                    pixels[py * rowSize + px + 1] = 180; // Green
+                    pixels[py * rowSize + px + 2] = 80;  // Red
+                } else {
+                    pixels[py * rowSize + px + 0] = 60;
+                    pixels[py * rowSize + px + 1] = 30;
+                    pixels[py * rowSize + px + 2] = 20;
+                }
+            }
+        }
+    }
+
     fwrite(pixels, 1, rowSize * height, f);
     free(pixels);
     fclose(f);

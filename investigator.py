@@ -4,7 +4,8 @@ import json
 import subprocess
 import time
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QLabel, QLineEdit, QComboBox, QTextEdit, QPushButton, QScrollArea, QFileDialog)
+                             QLabel, QLineEdit, QComboBox, QTextEdit, QPushButton, QScrollArea, QFileDialog,
+                             QCheckBox)
 from PyQt6.QtGui import QPixmap, QImage
 from PyQt6.QtCore import Qt, QTimer, QFileSystemWatcher
 
@@ -25,6 +26,7 @@ class Investigator(QMainWindow):
         self.annotations = {}
         self.pre_populated_values = {}
         self.sim_process = None
+        self.live_sim_process = None
         
         self.init_ui()
         self.load_annotations()
@@ -48,8 +50,12 @@ class Investigator(QMainWindow):
         self.status_label = QLabel("Ready")
         left_panel.addWidget(self.status_label)
         
+        self.context_label = QLabel("No snapshot selected")
+        self.context_label.setStyleSheet("font-weight: bold; color: #555;")
+        left_panel.addWidget(self.context_label)
+        
         self.image_label = QLabel("No snapshot selected")
-        self.image_label.setFixedSize(640, 320)
+        self.image_label.setFixedSize(640, 440)
         self.image_label.setStyleSheet("border: 1px solid black; background: #eee;")
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         left_panel.addWidget(self.image_label)
@@ -76,41 +82,65 @@ class Investigator(QMainWindow):
         # Right side: Annotation form
         right_panel = QVBoxLayout()
         
+        self.btn_rebuild = QPushButton("Rebuild Assumptions (All)")
+        self.btn_rebuild.clicked.connect(self.rebuild_all_assumptions)
+        self.btn_rebuild.setStyleSheet("background-color: #444; color: white;")
+        right_panel.addWidget(self.btn_rebuild)
+
         form_layout = QVBoxLayout()
         
-        form_layout.addWidget(QLabel("Stage:"))
+        # Helper to add field with checkbox
+        def add_confirmable_field(label_text, widget):
+            row = QHBoxLayout()
+            label = QLabel(label_text)
+            label.setFixedWidth(120)
+            row.addWidget(label)
+            row.addWidget(widget)
+            cb = QCheckBox("Confirm")
+            cb.setFixedWidth(80) # Fixed width for justification
+            row.addWidget(cb)
+            form_layout.addLayout(row)
+            return cb
+
         self.combo_stage = QComboBox()
         self.combo_stage.addItems(["Unknown", "Egg", "Baby", "Child", "Teen", "Adult", "Senior", "Angel"])
-        form_layout.addWidget(self.combo_stage)
-        
-        form_layout.addWidget(QLabel("Hunger (0-4):"))
-        self.edit_hunger = QLineEdit()
-        form_layout.addWidget(self.edit_hunger)
-        
-        form_layout.addWidget(QLabel("Happiness (0-4):"))
-        self.edit_happy = QLineEdit()
-        form_layout.addWidget(self.edit_happy)
+        self.cb_stage = add_confirmable_field("Stage:", self.combo_stage)
 
-        form_layout.addWidget(QLabel("Discipline:"))
+        self.edit_age = QLineEdit()
+        self.cb_age = add_confirmable_field("Age (years):", self.edit_age)
+
+        self.edit_weight = QLineEdit()
+        self.cb_weight = add_confirmable_field("Weight (oz):", self.edit_weight)
+
         self.edit_discipline = QLineEdit()
-        form_layout.addWidget(self.edit_discipline)
+        self.cb_discipline = add_confirmable_field("Discipline:", self.edit_discipline)
         
-        form_layout.addWidget(QLabel("Poop (0-4):"))
+        self.edit_hunger = QLineEdit()
+        self.cb_hunger = add_confirmable_field("Hunger (0-4):", self.edit_hunger)
+        
+        self.edit_happy = QLineEdit()
+        self.cb_happy = add_confirmable_field("Happiness (0-4):", self.edit_happy)
+
+        self.combo_attention = QComboBox()
+        self.combo_attention.addItems(["Unsure", "No", "Yes"])
+        self.cb_attention = add_confirmable_field("Needs Attn:", self.combo_attention)
+        
         self.edit_poop = QLineEdit()
-        form_layout.addWidget(self.edit_poop)
+        self.cb_poop = add_confirmable_field("Poop (0-4):", self.edit_poop)
         
-        form_layout.addWidget(QLabel("Sick:"))
         self.combo_sick = QComboBox()
         self.combo_sick.addItems(["Unsure", "No", "Yes"])
-        form_layout.addWidget(self.combo_sick)
+        self.cb_sick = add_confirmable_field("Sick:", self.combo_sick)
 
-        form_layout.addWidget(QLabel("Sleeping:"))
         self.combo_sleeping = QComboBox()
         self.combo_sleeping.addItems(["Unsure", "No", "Yes"])
-        form_layout.addWidget(self.combo_sleeping)
+        self.cb_sleeping = add_confirmable_field("Sleeping:", self.combo_sleeping)
 
         form_layout.addWidget(QLabel("Time (HH:MM:SS AM/PM):"))
         time_layout = QHBoxLayout()
+        label_time = QLabel("Time:")
+        label_time.setFixedWidth(120)
+        time_layout.addWidget(label_time)
         self.edit_time_h = QLineEdit(); self.edit_time_h.setPlaceholderText("HH")
         self.edit_time_m = QLineEdit(); self.edit_time_m.setPlaceholderText("MM")
         self.edit_time_s = QLineEdit(); self.edit_time_s.setPlaceholderText("SS")
@@ -119,20 +149,14 @@ class Investigator(QMainWindow):
         time_layout.addWidget(self.edit_time_m)
         time_layout.addWidget(self.edit_time_s)
         time_layout.addWidget(self.combo_ampm)
+        self.cb_time = QCheckBox("Confirm")
+        self.cb_time.setFixedWidth(80)
+        time_layout.addWidget(self.cb_time)
         form_layout.addLayout(time_layout)
 
-        form_layout.addWidget(QLabel("Screen:"))
         self.combo_screen = QComboBox()
         self.combo_screen.addItems(["Main", "Feeding", "Gaming", "Stats", "Angel", "Clock", "Other"])
-        form_layout.addWidget(self.combo_screen)
-
-        form_layout.addWidget(QLabel("Weight (oz):"))
-        self.edit_weight = QLineEdit()
-        form_layout.addWidget(self.edit_weight)
-
-        form_layout.addWidget(QLabel("Age (years):"))
-        self.edit_age = QLineEdit()
-        form_layout.addWidget(self.edit_age)
+        self.cb_screen = add_confirmable_field("Screen:", self.combo_screen)
 
         form_layout.addWidget(QLabel("Notes:"))
         self.text_notes = QTextEdit()
@@ -140,8 +164,9 @@ class Investigator(QMainWindow):
         
         right_panel.addLayout(form_layout)
         
-        self.btn_save = QPushButton("Save Annotation")
-        self.btn_save.clicked.connect(self.save_current_annotation)
+        self.btn_save = QPushButton("Save & Next")
+        self.btn_save.clicked.connect(self.save_and_next)
+        self.btn_save.setStyleSheet("background-color: #282; color: white; height: 40px; font-weight: bold;")
         right_panel.addWidget(self.btn_save)
         
         main_layout.addLayout(right_panel, stretch=1)
@@ -165,16 +190,26 @@ class Investigator(QMainWindow):
 
     def refresh_snapshots(self):
         files = [f for f in os.listdir(CAPTURES_DIR) if f.endswith(".bmp")]
-        # Sort by timestamp in filename
         files.sort()
         
         new_snapshots = [f.replace(".bmp", "") for f in files]
         if new_snapshots != self.snapshots:
+            is_first_load = (len(self.snapshots) == 0)
             self.snapshots = new_snapshots
-            if self.current_index == -1 and self.snapshots:
-                self.set_snapshot(0)
             
-            count_text = f"Captures: {len(self.snapshots)}/100"
+            # Count annotated
+            annotated_count = sum(1 for s in self.snapshots if s in self.annotations and self.annotations[s].get("truth"))
+            
+            if self.current_index == -1 and self.snapshots:
+                # On startup, find the first un-annotated snapshot
+                target_index = 0
+                for i, name in enumerate(self.snapshots):
+                    if name not in self.annotations or not self.annotations[name].get("truth"):
+                        target_index = i
+                        break
+                self.set_snapshot(target_index)
+            
+            count_text = f"Captures: {len(self.snapshots)}/100 (Annotated: {annotated_count})"
             self.status_label.setText(count_text)
             self.capture_count_label.setText(count_text)
             
@@ -194,6 +229,12 @@ class Investigator(QMainWindow):
             name = self.snapshots[index]
             bmp_path = os.path.join(CAPTURES_DIR, name + ".bmp")
             
+            is_done = name in self.annotations and self.annotations[name].get("truth")
+            status_tag = " <font color='green'>[ANNOTATED]</font>" if is_done else ""
+            
+            context_text = f"Viewing capture {index + 1}/{len(self.snapshots)}: {name}{status_tag}"
+            self.context_label.setText(context_text)
+            
             pixmap = QPixmap(bmp_path)
             self.image_label.setPixmap(pixmap.scaled(self.image_label.size(), Qt.AspectRatioMode.KeepAspectRatio))
             
@@ -205,6 +246,7 @@ class Investigator(QMainWindow):
         self.edit_hunger.clear()
         self.edit_happy.clear()
         self.edit_discipline.clear()
+        self.combo_attention.setCurrentIndex(0)
         self.edit_poop.clear()
         self.combo_sick.setCurrentIndex(0)
         self.combo_sleeping.setCurrentIndex(0)
@@ -217,35 +259,148 @@ class Investigator(QMainWindow):
         self.edit_age.clear()
         self.text_notes.clear()
         
+        # Reset Checkboxes
+        conf_widgets = [self.cb_stage, self.cb_hunger, self.cb_happy, self.cb_discipline, 
+                        self.cb_poop, self.cb_sick, self.cb_sleeping, self.cb_attention, 
+                        self.cb_time, self.cb_screen, self.cb_weight, self.cb_age]
+        for cb in conf_widgets:
+            cb.setChecked(False)
+
         self.pre_populated_values = {}
+        
+        # Always run pre-populate first to get the guesses from .bin
+        bin_path = os.path.join(CAPTURES_DIR, name + ".bin")
+        self.pre_populate(bin_path)
 
         if name in self.annotations:
-            data = self.annotations[name]
-            self.combo_stage.setCurrentText(data.get("stage", "Unknown"))
-            self.edit_hunger.setText(str(data.get("hunger", "")))
-            self.edit_happy.setText(str(data.get("happy", "")))
-            self.edit_discipline.setText(str(data.get("discipline", "")))
-            self.edit_poop.setText(str(data.get("poop", "")))
-            self.combo_sick.setCurrentText("Yes" if data.get("sick") else ("No" if data.get("sick") == False else "Unsure"))
-            self.combo_sleeping.setCurrentText("Yes" if data.get("sleeping") else ("No" if data.get("sleeping") == False else "Unsure"))
+            print(f"[debug] Loading existing annotation for {name}")
+            entry = self.annotations[name]
+            truth = entry.get("truth", {})
+            mod = entry.get("mod", [])
             
-            time_data = data.get("time", {})
-            self.edit_time_h.setText(str(time_data.get("h", "")))
-            self.edit_time_m.setText(str(time_data.get("m", "")))
-            self.edit_time_s.setText(str(time_data.get("s", "")))
-            self.combo_ampm.setCurrentText(time_data.get("ampm", "AM"))
+            # Map truth to UI, but only if it exists in truth (meaning confirmed or modified)
+            if "stage" in truth: 
+                self.combo_stage.setCurrentText(truth["stage"])
+                self.cb_stage.setChecked("stage" not in mod)
             
-            self.combo_screen.setCurrentText(data.get("screen", "Main"))
-            self.edit_weight.setText(str(data.get("weight", "")))
-            self.edit_age.setText(str(data.get("age", "")))
-            self.text_notes.setPlainText(data.get("notes", ""))
+            if "hunger" in truth: 
+                self.edit_hunger.setText(str(truth["hunger"]))
+                self.cb_hunger.setChecked("hunger" not in mod)
             
-            # If there's a stored pre-population for this snapshot, load it for comparison
-            self.pre_populated_values = data.get("pre_populated", {})
+            if "happy" in truth: 
+                self.edit_happy.setText(str(truth["happy"]))
+                self.cb_happy.setChecked("happy" not in mod)
+            
+            if "discipline" in truth: 
+                self.edit_discipline.setText(str(truth["discipline"]))
+                self.cb_discipline.setChecked("discipline" not in mod)
+
+            if "attention" in truth:
+                self.combo_attention.setCurrentText("Yes" if truth["attention"] else "No")
+                self.cb_attention.setChecked("attention" not in mod)
+            
+            if "poop" in truth: 
+                self.edit_poop.setText(str(truth["poop"]))
+                self.cb_poop.setChecked("poop" not in mod)
+            
+            if "sick" in truth: 
+                self.combo_sick.setCurrentText("Yes" if truth["sick"] else "No")
+                self.cb_sick.setChecked("sick" not in mod)
+            
+            if "sleeping" in truth: 
+                self.combo_sleeping.setCurrentText("Yes" if truth["sleeping"] else "No")
+                self.cb_sleeping.setChecked("sleeping" not in mod)
+            
+            if "time" in truth:
+                try:
+                    parts = truth["time"].split(" ")
+                    hms = parts[0].split(":")
+                    self.edit_time_h.setText(hms[0])
+                    self.edit_time_m.setText(hms[1])
+                    self.edit_time_s.setText(hms[2])
+                    self.combo_ampm.setCurrentText(parts[1])
+                    self.cb_time.setChecked("time" not in mod)
+                except: pass
+            
+            if "screen" in truth: 
+                self.combo_screen.setCurrentText(truth["screen"])
+                self.cb_screen.setChecked("screen" not in mod)
+            
+            if "weight" in truth: 
+                self.edit_weight.setText(str(truth["weight"]))
+                self.cb_weight.setChecked("weight" not in mod)
+            
+            if "age" in truth: 
+                self.edit_age.setText(str(truth["age"]))
+                self.cb_age.setChecked("age" not in mod)
+            
+            self.text_notes.setPlainText(entry.get("notes", ""))
         else:
-            # Pre-populate from binary
+            print(f"[debug] No existing annotation for {name}, using fresh guesses.")
+
+    def save_and_next(self):
+        # Close any open sim windows
+        if self.live_sim_process:
+            self.live_sim_process.terminate()
+            self.live_sim_process = None
+        
+        if self.sim_process:
+            self.sim_process.terminate()
+            self.sim_process = None
+            
+        self.save_current_annotation()
+        self.next_snapshot()
+
+    def rebuild_all_assumptions(self):
+        for name in self.snapshots:
             bin_path = os.path.join(CAPTURES_DIR, name + ".bin")
-            self.pre_populate(bin_path)
+            if os.path.exists(bin_path):
+                try:
+                    with open(bin_path, 'rb') as f:
+                        content = f.read()
+                        mem = content[-MEMORY_SIZE_BYTES:]
+                        
+                        # Calculate guesses
+                        h_val = self.read_memory_nibble(mem, 0x40)
+                        hunger = 4 if h_val == 0xF else h_val // 4
+                        ha_val = self.read_memory_nibble(mem, 0x41)
+                        happy = 4 if ha_val == 0xF else ha_val // 4
+                        disc = self.read_memory_nibble(mem, 0x43)
+                        attn_val = self.read_memory_nibble(mem, 0x208)
+                        poop = self.read_memory_nibble(mem, 0x4D)
+                        sick_val = self.read_memory_nibble(mem, 0x48)
+                        sleep_val = self.read_memory_nibble(mem, 0x4A)
+                        is_sleeping = (sleep_val >= 8 and sleep_val <= 15)
+                        age = self.read_memory_nibble(mem, 0x42)
+                        weight = self.read_memory_bcd(mem, 0x38, 0x39)
+                        
+                        sec = self.read_memory_bcd(mem, 0x10, 0x11)
+                        min = self.read_memory_bcd(mem, 0x12, 0x13)
+                        h_ones = self.read_memory_nibble(mem, 0x14)
+                        h_tens = self.read_memory_nibble(mem, 0x15)
+                        h24 = (h_tens << 4) | h_ones
+                        ampm = "AM"
+                        h12 = h24
+                        if h24 == 0: h12 = 12
+                        elif h24 == 12: ampm = "PM"
+                        elif h24 > 12: h12 = h24 - 12; ampm = "PM"
+
+                        pre = {
+                            "hunger": hunger, "happy": happy, "discipline": disc,
+                            "attention": attn_val != 0,
+                            "poop": poop, "sick": sick_val >= 8, "sleeping": is_sleeping,
+                            "age": age, "weight": weight,
+                            "time": {"h": h12, "m": min, "s": sec, "ampm": ampm}
+                        }
+                        
+                        if name not in self.annotations:
+                            self.annotations[name] = {"pre_populated": pre}
+                        else:
+                            self.annotations[name]["pre_populated"] = pre
+                except:
+                    pass
+        self.save_annotations()
+        self.status_label.setText("Assumptions rebuilt!")
 
     def read_memory_nibble(self, mem_bytes, addr):
         byte_idx = addr >> 1
@@ -281,6 +436,9 @@ class Investigator(QMainWindow):
 
                 disc = self.read_memory_nibble(mem, 0x43)
                 self.edit_discipline.setText(str(disc))
+
+                attn_val = self.read_memory_nibble(mem, 0x208)
+                self.combo_attention.setCurrentText("Yes" if attn_val != 0 else "No")
                 
                 poop = self.read_memory_nibble(mem, 0x4D)
                 self.edit_poop.setText(str(poop))
@@ -326,6 +484,7 @@ class Investigator(QMainWindow):
                     "hunger": hunger,
                     "happy": happy,
                     "discipline": disc,
+                    "attention": attn_val != 0,
                     "poop": poop,
                     "sick": sick_val >= 8,
                     "sleeping": is_sleeping,
@@ -344,51 +503,72 @@ class Investigator(QMainWindow):
         if self.current_index == -1: return
         name = self.snapshots[self.current_index]
         
-        current_data = {
+        # Final Truth: Only includes fields that were either confirmed or modified
+        truth = {}
+        modified = []
+        pre = self.pre_populated_values
+        
+        def is_mod(val, key):
+            return pre and val != pre.get(key)
+
+        # Gather current UI values
+        cur = {
             "stage": self.combo_stage.currentText(),
+            "age": int(self.edit_age.text()) if self.edit_age.text().isdigit() else None,
+            "weight": int(self.edit_weight.text()) if self.edit_weight.text().isdigit() else None,
+            "discipline": int(self.edit_discipline.text()) if self.edit_discipline.text().isdigit() else None,
             "hunger": int(self.edit_hunger.text()) if self.edit_hunger.text().isdigit() else None,
             "happy": int(self.edit_happy.text()) if self.edit_happy.text().isdigit() else None,
-            "discipline": int(self.edit_discipline.text()) if self.edit_discipline.text().isdigit() else None,
+            "attention": True if self.combo_attention.currentText() == "Yes" else (False if self.combo_attention.currentText() == "No" else None),
             "poop": int(self.edit_poop.text()) if self.edit_poop.text().isdigit() else None,
             "sick": True if self.combo_sick.currentText() == "Yes" else (False if self.combo_sick.currentText() == "No" else None),
             "sleeping": True if self.combo_sleeping.currentText() == "Yes" else (False if self.combo_sleeping.currentText() == "No" else None),
-            "time": {
-                "h": int(self.edit_time_h.text()) if self.edit_time_h.text().isdigit() else None,
-                "m": int(self.edit_time_m.text()) if self.edit_time_m.text().isdigit() else None,
-                "s": int(self.edit_time_s.text()) if self.edit_time_s.text().isdigit() else None,
-                "ampm": self.combo_ampm.currentText()
-            },
             "screen": self.combo_screen.currentText(),
-            "weight": int(self.edit_weight.text()) if self.edit_weight.text().isdigit() else None,
-            "age": int(self.edit_age.text()) if self.edit_age.text().isdigit() else None,
-            "notes": self.text_notes.toPlainText(),
-            "investigated": True,
-            "pre_populated": self.pre_populated_values
+            "time": f"{self.edit_time_h.text()}:{self.edit_time_m.text()}:{self.edit_time_s.text()} {self.combo_ampm.currentText()}"
         }
 
-        # Detect modifications
-        modified = []
-        pre = self.pre_populated_values
-        if pre:
-            if current_data["hunger"] != pre.get("hunger"): modified.append("hunger")
-            if current_data["happy"] != pre.get("happy"): modified.append("happy")
-            if current_data["discipline"] != pre.get("discipline"): modified.append("discipline")
-            if current_data["poop"] != pre.get("poop"): modified.append("poop")
-            if current_data["sick"] != pre.get("sick"): modified.append("sick")
-            if current_data["sleeping"] != pre.get("sleeping"): modified.append("sleeping")
-            if current_data["age"] != pre.get("age"): modified.append("age")
-            if current_data["weight"] != pre.get("weight"): modified.append("weight")
-            
-            # Time check
-            cur_t = current_data["time"]
-            pre_t = pre.get("time", {})
-            if (cur_t["h"] != pre_t.get("h") or cur_t["m"] != pre_t.get("m") or 
-                cur_t["s"] != pre_t.get("s") or cur_t["ampm"] != pre_t.get("ampm")):
+        # Check for modifications
+        fields = ["stage", "age", "weight", "discipline", "hunger", "happy", "attention", "poop", "sick", "sleeping", "screen"]
+        for f in fields:
+            if is_mod(cur[f], f):
+                modified.append(f)
+
+        # Time mod check (special case)
+        if pre and "time" in pre:
+            pt = pre["time"]
+            cur_t_str = f"{pt['h']}:{pt['m']:02d}:{pt['s']:02d} {pt['ampm']}"
+            if cur["time"] != cur_t_str:
                 modified.append("time")
 
-        current_data["modified_fields"] = modified
-        
-        self.annotations[name] = current_data
+        # Map UI to Checkboxes
+        conf_map = {
+            "stage": self.cb_stage, "age": self.cb_age, "weight": self.cb_weight,
+            "discipline": self.cb_discipline, "hunger": self.cb_hunger, "happy": self.cb_happy,
+            "attention": self.cb_attention, "poop": self.cb_poop, "sick": self.cb_sick,
+            "sleeping": self.cb_sleeping, "screen": self.cb_screen, "time": self.cb_time
+        }
+
+        # Only save truth if confirmed OR modified
+        for f, cb in conf_map.items():
+            if cb.isChecked() or f in modified:
+                truth[f] = cur[f]
+
+        # Compact Guesses (Short keys for token efficiency)
+        guesses = {}
+        if pre:
+            g_map = {"hunger":"h", "happy":"ha", "discipline":"d", "attention":"at", "poop":"p", "sick":"s", "sleeping":"sl", "age":"a", "weight":"w"}
+            for k, short in g_map.items():
+                guesses[short] = pre.get(k)
+            if "time" in pre:
+                pt = pre["time"]
+                guesses["t"] = f"{pt['h']}:{pt['m']:02d}:{pt['s']:02d} {pt['ampm']}"
+
+        self.annotations[name] = {
+            "truth": truth,
+            "guesses": guesses,
+            "mod": modified,
+            "notes": self.text_notes.toPlainText()
+        }
         self.save_annotations()
 
     def prev_snapshot(self):
@@ -410,12 +590,16 @@ class Investigator(QMainWindow):
 
     def start_live_sim(self):
         if self.current_index == -1: return
+        
+        if self.live_sim_process:
+            self.live_sim_process.terminate()
+            
         name = self.snapshots[self.current_index]
         bin_path = os.path.join(CAPTURES_DIR, name + ".bin")
         
         # Start sim at 1x speed loading this state, babysitter off, NTP off
         cmd = [SIM_EXE, "--load-state", bin_path, "--babysitter", "off", "--no-ntp"]
-        subprocess.Popen(cmd)
+        self.live_sim_process = subprocess.Popen(cmd)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
