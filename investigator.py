@@ -3,6 +3,7 @@ import os
 import json
 import subprocess
 import time
+import memory_config
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QLabel, QLineEdit, QComboBox, QTextEdit, QPushButton, QScrollArea, QFileDialog,
                              QCheckBox)
@@ -360,39 +361,35 @@ class Investigator(QMainWindow):
                         content = f.read()
                         mem = content[-MEMORY_SIZE_BYTES:]
                         
-                        # Calculate guesses
-                        h_val = self.read_memory_nibble(mem, 0x40)
-                        hunger = 4 if h_val == 0xF else h_val // 4
-                        ha_val = self.read_memory_nibble(mem, 0x41)
-                        happy = 4 if ha_val == 0xF else ha_val // 4
-                        disc = self.read_memory_nibble(mem, 0x43)
-                        attn_val = self.read_memory_nibble(mem, 0x208)
-                        poop = self.read_memory_nibble(mem, 0x4D)
-                        sick_val = self.read_memory_nibble(mem, 0x48)
-                        sleep_val = self.read_memory_nibble(mem, 0x4A)
-                        is_sleeping = (sleep_val >= 8 and sleep_val <= 15)
-                        age = self.read_memory_nibble(mem, 0x42)
-                        weight = self.read_memory_bcd(mem, 0x38, 0x39)
+                        pre = {
+                            "hunger": memory_config.get_value(mem, "hunger"),
+                            "happy": memory_config.get_value(mem, "happy"),
+                            "discipline": memory_config.get_value(mem, "discipline"),
+                            "attention": memory_config.get_value(mem, "attention"),
+                            "poop": memory_config.get_value(mem, "poop"),
+                            "sick": memory_config.get_value(mem, "sick"),
+                            "sleeping": memory_config.get_value(mem, "sleeping"),
+                            "age": memory_config.get_value(mem, "age"),
+                            "weight": memory_config.get_value(mem, "weight")
+                        }
                         
-                        sec = self.read_memory_bcd(mem, 0x10, 0x11)
-                        min = self.read_memory_bcd(mem, 0x12, 0x13)
-                        h_ones = self.read_memory_nibble(mem, 0x14)
-                        h_tens = self.read_memory_nibble(mem, 0x15)
+                        # Time
+                        sec_ones = memory_config.decode_nibble(mem, 0x10)
+                        sec_tens = memory_config.decode_nibble(mem, 0x11)
+                        min_ones = memory_config.decode_nibble(mem, 0x12)
+                        min_tens = memory_config.decode_nibble(mem, 0x13)
+                        h_ones = memory_config.decode_nibble(mem, 0x14)
+                        h_tens = memory_config.decode_nibble(mem, 0x15)
+                        sec = sec_tens * 10 + sec_ones
+                        m = min_tens * 10 + min_ones
                         h24 = (h_tens << 4) | h_ones
                         ampm = "AM"
                         h12 = h24
                         if h24 == 0: h12 = 12
                         elif h24 == 12: ampm = "PM"
                         elif h24 > 12: h12 = h24 - 12; ampm = "PM"
+                        pre["time"] = {"h": h12, "m": m, "s": sec, "ampm": ampm}
 
-                        pre = {
-                            "hunger": hunger, "happy": happy, "discipline": disc,
-                            "attention": attn_val != 0,
-                            "poop": poop, "sick": sick_val >= 8, "sleeping": is_sleeping,
-                            "age": age, "weight": weight,
-                            "time": {"h": h12, "m": min, "s": sec, "ampm": ampm}
-                        }
-                        
                         if name not in self.annotations:
                             self.annotations[name] = {"pre_populated": pre}
                         else:
@@ -402,102 +399,84 @@ class Investigator(QMainWindow):
         self.save_annotations()
         self.status_label.setText("Assumptions rebuilt!")
 
-    def read_memory_nibble(self, mem_bytes, addr):
-        byte_idx = addr >> 1
-        if byte_idx >= len(mem_bytes): return 0
-        val = mem_bytes[byte_idx]
-        if (addr & 1) == 0:
-            return (val & 0xF0) >> 4
-        else:
-            return val & 0x0F
-
-    def read_memory_bcd(self, mem_bytes, addr_ones, addr_tens):
-        ones = self.read_memory_nibble(mem_bytes, addr_ones)
-        tens = self.read_memory_nibble(mem_bytes, addr_tens)
-        return tens * 10 + ones
-
     def pre_populate(self, bin_path):
         if not os.path.exists(bin_path): return
         
         try:
             with open(bin_path, 'rb') as f:
                 content = f.read()
-                # Memory is the last 0x140 bytes
                 mem = content[-MEMORY_SIZE_BYTES:]
                 
-                # Using guesses from babysitter.h
-                h_val = self.read_memory_nibble(mem, 0x40)
-                hunger = 4 if h_val == 0xF else h_val // 4
+                # Use unified memory_config
+                hunger = memory_config.get_value(mem, "hunger")
                 self.edit_hunger.setText(str(hunger))
                 
-                ha_val = self.read_memory_nibble(mem, 0x41)
-                happy = 4 if ha_val == 0xF else ha_val // 4
+                happy = memory_config.get_value(mem, "happy")
                 self.edit_happy.setText(str(happy))
 
-                disc = self.read_memory_nibble(mem, 0x43)
+                disc = memory_config.get_value(mem, "discipline")
                 self.edit_discipline.setText(str(disc))
 
-                attn_val = self.read_memory_nibble(mem, 0x208)
-                self.combo_attention.setCurrentText("Yes" if attn_val != 0 else "No")
+                attn = memory_config.get_value(mem, "attention")
+                self.combo_attention.setCurrentText("Yes" if attn else "No")
                 
-                poop = self.read_memory_nibble(mem, 0x4D)
+                poop = memory_config.get_value(mem, "poop")
                 self.edit_poop.setText(str(poop))
                 
-                sick_val = self.read_memory_nibble(mem, 0x48)
-                self.combo_sick.setCurrentText("Yes" if sick_val >= 8 else "No")
+                sick = memory_config.get_value(mem, "sick")
+                self.combo_sick.setCurrentText("Yes" if sick else "No")
 
-                # Sleeping Guess: 0x4A (8-F is sleeping)
-                sleep_val = self.read_memory_nibble(mem, 0x4A)
-                is_sleeping = (sleep_val >= 8 and sleep_val <= 15)
-                self.combo_sleeping.setCurrentText("Yes" if is_sleeping else "No")
+                sleep = memory_config.get_value(mem, "sleeping")
+                self.combo_sleeping.setCurrentText("Yes" if sleep else "No")
 
-                # Age Guess: 0x42
-                age = self.read_memory_nibble(mem, 0x42)
+                age = memory_config.get_value(mem, "age")
                 self.edit_age.setText(str(age))
 
-                # Weight Guess: 0x38 (ones) 0x39 (tens) - BCD
-                weight = self.read_memory_bcd(mem, 0x38, 0x39)
+                weight = memory_config.get_value(mem, "weight")
                 self.edit_weight.setText(str(weight))
 
-                # Time: 0x10-0x15
-                sec = self.read_memory_bcd(mem, 0x10, 0x11)
-                min = self.read_memory_bcd(mem, 0x12, 0x13)
-                h_ones = self.read_memory_nibble(mem, 0x14)
-                h_tens = self.read_memory_nibble(mem, 0x15)
-                h24 = (h_tens << 4) | h_ones
+                # Time (Still custom as it requires multiple fields)
+                sec_ones = memory_config.decode_nibble(mem, 0x10)
+                sec_tens = memory_config.decode_nibble(mem, 0x11)
+                min_ones = memory_config.decode_nibble(mem, 0x12)
+                min_tens = memory_config.decode_nibble(mem, 0x13)
+                h_ones = memory_config.decode_nibble(mem, 0x14)
+                h_tens = memory_config.decode_nibble(mem, 0x15)
+                
+                sec = sec_tens * 10 + sec_ones
+                m = min_tens * 10 + min_ones
+                h24 = (h_tens << 4) | h_ones # hour is weirdly flipped hex
                 
                 ampm = "AM"
                 h12 = h24
                 if h24 == 0: h12 = 12
                 elif h24 == 12: ampm = "PM"
-                elif h24 > 12:
-                    h12 = h24 - 12
-                    ampm = "PM"
+                elif h24 > 12: h12 = h24 - 12; ampm = "PM"
                 
                 self.edit_time_h.setText(str(h12))
-                self.edit_time_m.setText(f"{min:02d}")
+                self.edit_time_m.setText(f"{m:02d}")
                 self.edit_time_s.setText(f"{sec:02d}")
                 self.combo_ampm.setCurrentText(ampm)
 
-                # Store pre-populated for later comparison
                 self.pre_populated_values = {
-                    "hunger": hunger,
-                    "happy": happy,
-                    "discipline": disc,
-                    "attention": attn_val != 0,
-                    "poop": poop,
-                    "sick": sick_val >= 8,
-                    "sleeping": is_sleeping,
-                    "age": age,
-                    "weight": weight,
-                    "time": {"h": h12, "m": min, "s": sec, "ampm": ampm}
+                    "hunger": hunger, "happy": happy, "discipline": disc,
+                    "attention": attn, "poop": poop, "sick": sick,
+                    "sleeping": sleep, "age": age, "weight": weight,
+                    "time": {"h": h12, "m": m, "s": sec, "ampm": ampm}
                 }
 
-                # Egg check
-                if self.read_memory_nibble(mem, 0x5D) == 0:
+                if memory_config.get_value(mem, "stage") == "Egg":
                     self.combo_stage.setCurrentText("Egg")
         except Exception as e:
             print(f"Error pre-populating: {e}")
+
+    def read_memory_nibble(self, mem_bytes, addr):
+        return memory_config.decode_nibble(mem_bytes, addr)
+
+    def read_memory_bcd(self, mem_bytes, addr_ones, addr_tens):
+        ones = self.read_memory_nibble(mem_bytes, addr_ones)
+        tens = self.read_memory_nibble(mem_bytes, addr_tens)
+        return tens * 10 + ones
 
     def save_current_annotation(self):
         if self.current_index == -1: return

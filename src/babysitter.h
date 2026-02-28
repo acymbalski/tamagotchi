@@ -6,11 +6,14 @@
 #define MEM_LOC_SELECTION 0x75
 #define MEM_LOC_HUNGER 0x40
 #define MEM_LOC_HAPPY 0x41
+#define MEM_LOC_AGE 0x54
 #define MEM_LOC_DISCIPLINE 0x43
 #define MEM_LOC_SICK 0x48
 #define MEM_LOC_LIGHTS 0x4B
 #define MEM_LOC_POOP 0x4D
 #define MEM_LOC_MENU 0x75
+#define MEM_LOC_ATTENTION 0x02D
+#define MEM_LOC_WEIGHT 0x046
 
 #define MENU_NONE 0x0
 #define MENU_FOOD 0x1
