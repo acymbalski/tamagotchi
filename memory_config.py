@@ -44,6 +44,6 @@ def get_value(mem, key):
         tens = decode_nibble(mem, addr + 1)
         return tens * 10 + ones
     elif ctype == "egg_logic":
-        return "Egg" if decode_nibble(mem, addr) == 0 else "Unknown"
+        return "Egg (New)" if decode_nibble(mem, addr) == 0 else "Unknown"
     
     return None

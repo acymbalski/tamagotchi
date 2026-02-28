@@ -104,7 +104,13 @@ class Investigator(QMainWindow):
             return cb
 
         self.combo_stage = QComboBox()
-        self.combo_stage.addItems(["Unknown", "Egg", "Baby", "Child", "Teen", "Adult", "Senior", "Angel"])
+        self.combo_stage.addItems([
+            "Unknown", "Egg (New)", "Egg (Init)", "Babitchi (Baby)", "Marutchi (Child)", 
+            "Tamatchi (Teen)", "KuchiTamatchi (Teen)", "Mametchi (Adult)", "Ginjirotchi (Adult)", 
+            "Maskutchi (Adult)", "Kuchipatchi (Adult)", "Nyorotchi (Adult)", "Tarakotchi (Adult)", 
+            "Oyajitchi (Senior)", "Bill [Gaijintchi] (Senior)", "Bill [Ketotchi] (Senior)", 
+            "Bill [Unknown] (Senior)", "Angel (Dead)"
+        ])
         self.cb_stage = add_confirmable_field("Stage:", self.combo_stage)
 
         self.edit_age = QLineEdit()
