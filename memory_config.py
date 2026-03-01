@@ -3,7 +3,7 @@
 MAP = {
     "hunger":       {"addr": 0x040, "type": "level"},       # 0-F scaled to 0-4
     "happy":        {"addr": 0x041, "type": "level"},       # 0-F scaled to 0-4
-    "discipline":   {"addr": 0x043, "type": "nibble"},      # Raw nibble
+    "discipline":   {"addr": 0x043, "type": "level"},       # 0-F scaled to 0-4
     "attention":    {"addr": 0x02D, "type": "bool"},        # Non-zero = needs attention
     "poop":         {"addr": 0x04D, "type": "nibble"},      # Count of poops
     "sick":         {"addr": 0x048, "type": "bool_8"},      # >= 8 is sick
