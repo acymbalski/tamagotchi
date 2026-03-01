@@ -557,12 +557,11 @@ static void hal_update_screen(void) {
 
 /* ---- Reset ---- */
 static void perform_reset(void) {
-    pc_delete_save();
     memset(matrix_buffer, 0, sizeof(matrix_buffer));
     memset(icon_buffer,   0, sizeof(icon_buffer));
     tamalib_reset();
     resetBabysitterState();
-    printf("[reset] Hard reset complete\n");
+    printf("[reset] Reset complete (save file preserved)\n");
     fflush(stdout);
 }
 
