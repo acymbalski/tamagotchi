@@ -10,7 +10,8 @@ MAP = {
     "sleeping":     {"addr": 0x04A, "type": "sleep_logic"}, # 8-F is sleeping
     "age":          {"addr": 0x054, "type": "nibble"},      # Age in years
     "weight":       {"addr": 0x046, "type": "bcd"},         # Weight in oz
-    "stage":        {"addr": 0x05D, "type": "egg_logic"},   # Egg/Life stage tracking
+    "lifecycle":    {"addr": 0x05D, "type": "stage_logic"}, # Lifecycle stage (0, 1, 2, 4...)
+    "character":    {"addr": None,  "type": "nibble"},      # Character within stage
 
     # --- Not yet discovered (addr=None until confirmed via analyzer.py) ---
     # Find via: python analyzer.py --field life_stage  (captures spanning egg→adult)
@@ -54,5 +55,10 @@ def get_value(mem, key):
         return tens * 10 + ones
     elif ctype == "egg_logic":
         return "Egg (New)" if decode_nibble(mem, addr) == 0 else "Unknown"
+    elif ctype == "stage_logic":
+        val = decode_nibble(mem, addr)
+        # Binary: 0=Egg, 1=Baby, 2=Child, 4=Teen, 8=Adult, 16=Special
+        mapping = {0: "Egg", 1: "Baby", 2: "Child", 4: "Teen", 8: "Adult", 16: "Special"}
+        return mapping.get(val, "Unknown")
     
     return None

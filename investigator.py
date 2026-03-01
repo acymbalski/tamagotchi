@@ -16,21 +16,11 @@ CAPTURES_DIR = "captures"
 ANNOTATIONS_FILE = "annotations.json"
 MEMORY_SIZE_BYTES = 0x140
 
-# Sleep windows for stage consistency inference.
-# All windows wrap midnight (sleep_start > wake_end), so: in_window = h >= start or h < end
-_SLEEP_WINDOWS = {
-    "Child":  (20, 9),   # 8pm – 9am
-    "Teen":   (21, 9),   # 9pm – 9am
-    "Adult":  (22, 9),   # 10pm – 9am
-    "Senior": (22, 9),   # 10pm – 9am
-}
-
-
 class Investigator(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Tamagotchi Investigation Lab")
-        self.resize(1000, 700)
+        self.resize(1000, 750)
         
         self.snapshots = []
         self.current_index = -1
@@ -108,25 +98,26 @@ class Investigator(QMainWindow):
             row.addWidget(label)
             row.addWidget(widget)
             cb = QCheckBox("Confirm")
-            cb.setFixedWidth(80) # Fixed width for justification
+            cb.setFixedWidth(80)
             row.addWidget(cb)
             form_layout.addLayout(row)
             return cb
 
+        # New Stage field
         self.combo_stage = QComboBox()
-        self.combo_stage.addItems([
+        self.combo_stage.addItems(["Unknown", "Egg", "Baby", "Child", "Teen", "Adult", "Special", "Dead"])
+        self.cb_stage = add_confirmable_field("Stage:", self.combo_stage)
+
+        # Character field (replaces old Stage)
+        self.combo_character = QComboBox()
+        self.combo_character.addItems([
             "Unknown", "Egg (New)", "Egg (Init)", "Babitchi (Baby)", "Marutchi (Child)", 
             "Tamatchi (Teen)", "KuchiTamatchi (Teen)", "Mametchi (Adult)", "Ginjirotchi (Adult)", 
             "Maskutchi (Adult)", "Kuchipatchi (Adult)", "Nyorotchi (Adult)", "Tarakotchi (Adult)", 
             "Oyajitchi (Senior)", "Bill [Gaijintchi] (Senior)", "Bill [Ketotchi] (Senior)", 
             "Bill [Unknown] (Senior)", "Angel (Dead)"
         ])
-        self.cb_stage = add_confirmable_field("Stage:", self.combo_stage)
-
-        self.stage_hint_label = QLabel("")
-        self.stage_hint_label.setWordWrap(True)
-        self.stage_hint_label.setStyleSheet("color: #888; font-size: 10px; font-style: italic;")
-        form_layout.addWidget(self.stage_hint_label)
+        self.cb_character = add_confirmable_field("Character:", self.combo_character)
 
         self.edit_age = QLineEdit()
         self.cb_age = add_confirmable_field("Age (years):", self.edit_age)
@@ -135,7 +126,7 @@ class Investigator(QMainWindow):
         self.cb_weight = add_confirmable_field("Weight (oz):", self.edit_weight)
 
         self.edit_discipline = QLineEdit()
-        self.cb_discipline = add_confirmable_field("Discipline:", self.edit_discipline)
+        self.cb_discipline = add_confirmable_field("Discipline (0-4):", self.edit_discipline)
         
         self.edit_hunger = QLineEdit()
         self.cb_hunger = add_confirmable_field("Hunger (0-4):", self.edit_hunger)
@@ -158,7 +149,6 @@ class Investigator(QMainWindow):
         self.combo_sleeping.addItems(["Unsure", "No", "Yes"])
         self.cb_sleeping = add_confirmable_field("Sleeping:", self.combo_sleeping)
 
-        form_layout.addWidget(QLabel("Time (HH:MM:SS AM/PM):"))
         time_layout = QHBoxLayout()
         label_time = QLabel("Time:")
         label_time.setFixedWidth(120)
@@ -201,46 +191,8 @@ class Investigator(QMainWindow):
         # Connect signals for real-time highlighting
         for edit in [self.edit_age, self.edit_weight, self.edit_discipline, self.edit_hunger, self.edit_happy, self.edit_poop]:
             edit.textChanged.connect(self.highlight_discrepancies)
-        for combo in [self.combo_attention, self.combo_sick, self.combo_sleeping]:
+        for combo in [self.combo_attention, self.combo_sick, self.combo_sleeping, self.combo_stage, self.combo_character]:
             combo.currentIndexChanged.connect(self.highlight_discrepancies)
-
-        # Stage hint: re-evaluate whenever sleeping or time changes
-        self.combo_sleeping.currentIndexChanged.connect(self.update_stage_hint)
-        self.edit_time_h.textChanged.connect(self.update_stage_hint)
-        self.combo_ampm.currentIndexChanged.connect(self.update_stage_hint)
-
-    def update_stage_hint(self):
-        """Show which stage categories are consistent with the current time + sleeping state."""
-        h_text = self.edit_time_h.text()
-        if not h_text.isdigit():
-            self.stage_hint_label.setText("")
-            return
-        h12 = int(h_text)
-        if h12 < 1 or h12 > 12:
-            self.stage_hint_label.setText("")
-            return
-        ampm = self.combo_ampm.currentText()
-        h24 = (0 if h12 == 12 else h12) if ampm == "AM" else (12 if h12 == 12 else h12 + 12)
-
-        sleeping_text = self.combo_sleeping.currentText()
-        if sleeping_text == "Unsure":
-            self.stage_hint_label.setText("")
-            return
-        sleeping = (sleeping_text == "Yes")
-
-        parts = []
-        any_bad = False
-        for cat, (ss, we) in _SLEEP_WINDOWS.items():
-            in_win = (h24 >= ss or h24 < we)   # all windows wrap midnight
-            ok = (sleeping == in_win)
-            parts.append(f"{cat}:{'OK' if ok else 'X'}")
-            if not ok:
-                any_bad = True
-
-        self.stage_hint_label.setText("  ".join(parts))
-        color = "#cc6600" if any_bad else "#448844"
-        self.stage_hint_label.setStyleSheet(
-            f"color: {color}; font-size: 10px; font-style: italic;")
 
     def load_annotations(self):
         if os.path.exists(ANNOTATIONS_FILE):
@@ -260,14 +212,11 @@ class Investigator(QMainWindow):
         
         new_snapshots = [f.replace(".bmp", "") for f in files]
         if new_snapshots != self.snapshots:
-            is_first_load = (len(self.snapshots) == 0)
             self.snapshots = new_snapshots
             
-            # Count annotated
             annotated_count = sum(1 for s in self.snapshots if s in self.annotations and self.annotations[s].get("truth"))
             
             if self.current_index == -1 and self.snapshots:
-                # On startup, find the first un-annotated snapshot
                 target_index = 0
                 for i, name in enumerate(self.snapshots):
                     if name not in self.annotations or not self.annotations[name].get("truth"):
@@ -278,16 +227,9 @@ class Investigator(QMainWindow):
             count_text = f"Captures: {len(self.snapshots)} (Annotated: {annotated_count})"
             self.status_label.setText(count_text)
             self.capture_count_label.setText(count_text)
-            
-            # Auto-pause logic removed - we want a lot now!
-            # if len(self.snapshots) >= 100 and self.sim_process:
-            #     self.sim_process.terminate()
-            #     self.sim_process = None
-            #     self.status_label.setText("Snapshots: 100/100 (PAUSED)")
 
     def set_snapshot(self, index):
         if 0 <= index < len(self.snapshots):
-            # Save current before moving
             if self.current_index != -1:
                 self.save_current_annotation()
             
@@ -317,22 +259,21 @@ class Investigator(QMainWindow):
             else:
                 widget.setStyleSheet("")
 
-        # Check each field
         set_style(self.edit_age, "age", int(self.edit_age.text()) if self.edit_age.text().isdigit() else None)
         set_style(self.edit_weight, "weight", int(self.edit_weight.text()) if self.edit_weight.text().isdigit() else None)
         set_style(self.edit_discipline, "discipline", int(self.edit_discipline.text()) if self.edit_discipline.text().isdigit() else None)
         set_style(self.edit_hunger, "hunger", int(self.edit_hunger.text()) if self.edit_hunger.text().isdigit() else None)
         set_style(self.edit_happy, "happy", int(self.edit_happy.text()) if self.edit_happy.text().isdigit() else None)
         set_style(self.edit_poop, "poop", int(self.edit_poop.text()) if self.edit_poop.text().isdigit() else None)
-        
-        # Combos
         set_style(self.combo_attention, "attention", self.combo_attention.currentText() == "Yes")
         set_style(self.combo_sick, "sick", self.combo_sick.currentText() == "Yes")
         set_style(self.combo_sleeping, "sleeping", self.combo_sleeping.currentText() == "Yes")
+        set_style(self.combo_stage, "stage", self.combo_stage.currentText())
 
     def load_snapshot_data(self, name):
         # Reset fields
         self.combo_stage.setCurrentIndex(0)
+        self.combo_character.setCurrentIndex(0)
         self.edit_hunger.clear()
         self.edit_happy.clear()
         self.edit_discipline.clear()
@@ -350,7 +291,7 @@ class Investigator(QMainWindow):
         self.text_notes.clear()
         
         # Reset Checkboxes
-        conf_widgets = [self.cb_stage, self.cb_hunger, self.cb_happy, self.cb_discipline, 
+        conf_widgets = [self.cb_stage, self.cb_character, self.cb_hunger, self.cb_happy, self.cb_discipline, 
                         self.cb_poop, self.cb_sick, self.cb_sleeping, self.cb_attention, 
                         self.cb_time, self.cb_screen, self.cb_weight, self.cb_age]
         for cb in conf_widgets:
@@ -358,20 +299,21 @@ class Investigator(QMainWindow):
 
         self.pre_populated_values = {}
         
-        # Always run pre-populate first to get the guesses from .bin
         bin_path = os.path.join(CAPTURES_DIR, name + ".bin")
         self.pre_populate(bin_path)
 
         if name in self.annotations:
-            print(f"[debug] Loading existing annotation for {name}")
             entry = self.annotations[name]
             truth = entry.get("truth", {})
             mod = entry.get("mod", [])
             
-            # Map truth to UI, but only if it exists in truth (meaning confirmed or modified)
             if "stage" in truth: 
                 self.combo_stage.setCurrentText(truth["stage"])
                 self.cb_stage.setChecked("stage" not in mod)
+
+            if "character" in truth:
+                self.combo_character.setCurrentText(truth["character"])
+                self.cb_character.setChecked("character" not in mod)
             
             if "hunger" in truth: 
                 self.edit_hunger.setText(str(truth["hunger"]))
@@ -425,13 +367,10 @@ class Investigator(QMainWindow):
                 self.cb_age.setChecked("age" not in mod)
             
             self.text_notes.setPlainText(entry.get("notes", ""))
-        else:
-            print(f"[debug] No existing annotation for {name}, using fresh guesses.")
         
         self.highlight_discrepancies()
 
     def save_and_next(self):
-        # Close any open sim windows
         if self.live_sim_process:
             self.live_sim_process.terminate()
             self.live_sim_process = None
@@ -461,7 +400,8 @@ class Investigator(QMainWindow):
                             "sick": memory_config.get_value(mem, "sick"),
                             "sleeping": memory_config.get_value(mem, "sleeping"),
                             "age": memory_config.get_value(mem, "age"),
-                            "weight": memory_config.get_value(mem, "weight")
+                            "weight": memory_config.get_value(mem, "weight"),
+                            "stage": memory_config.get_value(mem, "lifecycle")
                         }
                         
                         # Time
@@ -480,17 +420,13 @@ class Investigator(QMainWindow):
                         elif h24 == 12: ampm = "PM"
                         elif h24 > 12: h12 = h24 - 12; ampm = "PM"
                         pre["time"] = {"h": h12, "m": m, "s": sec, "ampm": ampm}
-
-                        # Stage/Screen
-                        pre["stage"] = memory_config.get_value(mem, "stage")
                         pre["screen"] = "Main"
 
                         if name not in self.annotations:
                             self.annotations[name] = {"pre_populated": pre}
                         else:
                             self.annotations[name]["pre_populated"] = pre
-                except:
-                    pass
+                except: pass
         self.save_annotations()
         self.status_label.setText("Assumptions rebuilt!")
 
@@ -502,7 +438,6 @@ class Investigator(QMainWindow):
                 content = f.read()
                 mem = content[-MEMORY_SIZE_BYTES:]
                 
-                # Use unified memory_config
                 hunger = memory_config.get_value(mem, "hunger")
                 self.edit_hunger.setText(str(hunger))
                 
@@ -530,63 +465,46 @@ class Investigator(QMainWindow):
                 weight = memory_config.get_value(mem, "weight")
                 self.edit_weight.setText(str(weight))
 
-                # Time (Still custom as it requires multiple fields)
+                lifecycle = memory_config.get_value(mem, "lifecycle")
+                self.combo_stage.setCurrentText(lifecycle if lifecycle else "Unknown")
+
+                # Time
                 sec_ones = memory_config.decode_nibble(mem, 0x10)
                 sec_tens = memory_config.decode_nibble(mem, 0x11)
                 min_ones = memory_config.decode_nibble(mem, 0x12)
                 min_tens = memory_config.decode_nibble(mem, 0x13)
                 h_ones = memory_config.decode_nibble(mem, 0x14)
                 h_tens = memory_config.decode_nibble(mem, 0x15)
-                
                 sec = sec_tens * 10 + sec_ones
                 m = min_tens * 10 + min_ones
-                h24 = (h_tens << 4) | h_ones # hour is weirdly flipped hex
-                
+                h24 = (h_tens << 4) | h_ones
                 ampm = "AM"
                 h12 = h24
                 if h24 == 0: h12 = 12
                 elif h24 == 12: ampm = "PM"
                 elif h24 > 12: h12 = h24 - 12; ampm = "PM"
-                
                 self.edit_time_h.setText(str(h12))
                 self.edit_time_m.setText(f"{m:02d}")
                 self.edit_time_s.setText(f"{sec:02d}")
                 self.combo_ampm.setCurrentText(ampm)
 
-                # Screen: default to Main for now
                 self.combo_screen.setCurrentText("Main")
-
-                # Stage: check memory
-                stage = memory_config.get_value(mem, "stage")
-                if stage and stage != "Unknown":
-                    self.combo_stage.setCurrentText(stage)
-                else:
-                    self.combo_stage.setCurrentIndex(0) # "Unknown"
 
                 self.pre_populated_values = {
                     "hunger": hunger, "happy": happy, "discipline": disc,
                     "attention": attn, "poop": poop, "sick": sick,
                     "sleeping": sleep, "age": age, "weight": weight,
-                    "time": {"h": h12, "m": m, "s": sec, "ampm": ampm},
                     "stage": self.combo_stage.currentText(),
+                    "time": {"h": h12, "m": m, "s": sec, "ampm": ampm},
                     "screen": self.combo_screen.currentText()
                 }
         except Exception as e:
             print(f"Error pre-populating: {e}")
 
-    def read_memory_nibble(self, mem_bytes, addr):
-        return memory_config.decode_nibble(mem_bytes, addr)
-
-    def read_memory_bcd(self, mem_bytes, addr_ones, addr_tens):
-        ones = self.read_memory_nibble(mem_bytes, addr_ones)
-        tens = self.read_memory_nibble(mem_bytes, addr_tens)
-        return tens * 10 + ones
-
     def save_current_annotation(self):
         if self.current_index == -1: return
         name = self.snapshots[self.current_index]
         
-        # Final Truth: Only includes fields that were either confirmed or modified
         truth = {}
         modified = []
         pre = self.pre_populated_values
@@ -594,9 +512,9 @@ class Investigator(QMainWindow):
         def is_mod(val, key):
             return pre and val != pre.get(key)
 
-        # Gather current UI values
         cur = {
             "stage": self.combo_stage.currentText(),
+            "character": self.combo_character.currentText(),
             "age": int(self.edit_age.text()) if self.edit_age.text().isdigit() else None,
             "weight": int(self.edit_weight.text()) if self.edit_weight.text().isdigit() else None,
             "discipline": int(self.edit_discipline.text()) if self.edit_discipline.text().isdigit() else None,
@@ -610,36 +528,31 @@ class Investigator(QMainWindow):
             "time": f"{self.edit_time_h.text()}:{self.edit_time_m.text()}:{self.edit_time_s.text()} {self.combo_ampm.currentText()}"
         }
 
-        # Check for modifications
-        fields = ["stage", "age", "weight", "discipline", "hunger", "happy", "attention", "poop", "sick", "sleeping", "screen"]
+        fields = ["stage", "character", "age", "weight", "discipline", "hunger", "happy", "attention", "poop", "sick", "sleeping", "screen"]
         for f in fields:
             if is_mod(cur[f], f):
                 modified.append(f)
 
-        # Time mod check (special case)
         if pre and "time" in pre:
             pt = pre["time"]
             cur_t_str = f"{pt['h']}:{pt['m']:02d}:{pt['s']:02d} {pt['ampm']}"
             if cur["time"] != cur_t_str:
                 modified.append("time")
 
-        # Map UI to Checkboxes
         conf_map = {
-            "stage": self.cb_stage, "age": self.cb_age, "weight": self.cb_weight,
+            "stage": self.cb_stage, "character": self.cb_character, "age": self.cb_age, "weight": self.cb_weight,
             "discipline": self.cb_discipline, "hunger": self.cb_hunger, "happy": self.cb_happy,
             "attention": self.cb_attention, "poop": self.cb_poop, "sick": self.cb_sick,
             "sleeping": self.cb_sleeping, "screen": self.cb_screen, "time": self.cb_time
         }
 
-        # Only save truth if confirmed OR modified
         for f, cb in conf_map.items():
             if cb.isChecked() or f in modified:
                 truth[f] = cur[f]
 
-        # Compact Guesses (Short keys for token efficiency)
         guesses = {}
         if pre:
-            g_map = {"hunger":"h", "happy":"ha", "discipline":"d", "attention":"at", "poop":"p", "sick":"s", "sleeping":"sl", "age":"a", "weight":"w"}
+            g_map = {"hunger":"h", "happy":"ha", "discipline":"d", "attention":"at", "poop":"p", "sick":"s", "sleeping":"sl", "age":"a", "weight":"w", "stage":"st"}
             for k, short in g_map.items():
                 guesses[short] = pre.get(k)
             if "time" in pre:
@@ -669,22 +582,16 @@ class Investigator(QMainWindow):
     def start_turbo_sim(self):
         if self.sim_process:
             self.sim_process.terminate()
-        
-        # Start sim in turbo mode with auto-snapshotting every 5 min, NTP off
         cmd = [SIM_EXE, "--turbo", "--auto-snapshot", "5", "--no-ntp"]
         self.sim_process = subprocess.Popen(cmd)
         self.status_label.setText("Sim running (Turbo)...")
 
     def start_live_sim(self):
         if self.current_index == -1: return
-        
         if self.live_sim_process:
             self.live_sim_process.terminate()
-            
         name = self.snapshots[self.current_index]
         bin_path = os.path.join(CAPTURES_DIR, name + ".bin")
-        
-        # Start sim at 1x speed loading this state, babysitter off, NTP off
         cmd = [SIM_EXE, "--load-state", bin_path, "--babysitter", "off", "--no-ntp"]
         self.live_sim_process = subprocess.Popen(cmd)
 
