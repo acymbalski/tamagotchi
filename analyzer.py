@@ -4,6 +4,33 @@ import argparse
 from collections import Counter
 import memory_config
 
+# Maps the annotated stage string → numeric fields used for memory discovery.
+# life_stage: the broad lifecycle position (0=egg_new through 7=dead).
+#   Egg (New) and Egg (Init) are kept distinct so analysis can determine whether
+#   the ROM encodes them as the same nibble value or different ones.
+# char_id: which character within that stage (0-indexed per stage).
+#   Single-variant stages all get char_id=0.
+#   These are analysis labels, NOT assumed ROM values.
+STAGE_MAP = {
+    "Egg (New)":                  {"life_stage": 0, "char_id": 0},
+    "Egg (Init)":                 {"life_stage": 1, "char_id": 0},
+    "Babitchi (Baby)":            {"life_stage": 2, "char_id": 0},
+    "Marutchi (Child)":           {"life_stage": 3, "char_id": 0},
+    "Tamatchi (Teen)":            {"life_stage": 4, "char_id": 0},
+    "KuchiTamatchi (Teen)":       {"life_stage": 4, "char_id": 1},
+    "Mametchi (Adult)":           {"life_stage": 5, "char_id": 0},
+    "Ginjirotchi (Adult)":        {"life_stage": 5, "char_id": 1},
+    "Maskutchi (Adult)":          {"life_stage": 5, "char_id": 2},
+    "Kuchipatchi (Adult)":        {"life_stage": 5, "char_id": 3},
+    "Nyorotchi (Adult)":          {"life_stage": 5, "char_id": 4},
+    "Tarakotchi (Adult)":         {"life_stage": 5, "char_id": 5},
+    "Oyajitchi (Senior)":         {"life_stage": 6, "char_id": 0},
+    "Bill [Gaijintchi] (Senior)": {"life_stage": 6, "char_id": 1},
+    "Bill [Ketotchi] (Senior)":   {"life_stage": 6, "char_id": 2},
+    "Bill [Unknown] (Senior)":    {"life_stage": 6, "char_id": 3},
+    "Angel (Dead)":               {"life_stage": 7, "char_id": 0},
+}
+
 # Configuration
 CAPTURES_DIR = "captures"
 ANNOTATIONS_FILE = "annotations.json"
@@ -22,6 +49,14 @@ class MemoryAnalyzer:
         if os.path.exists(ANNOTATIONS_FILE):
             with open(ANNOTATIONS_FILE, 'r') as f:
                 self.annotations = json.load(f)
+        # Silently expand each annotated "stage" string into numeric fields.
+        # Done in-memory only; annotations.json is never modified.
+        for data in self.annotations.values():
+            truth = data.get("truth", {})
+            if "stage" in truth and truth["stage"] in STAGE_MAP:
+                decomp = STAGE_MAP[truth["stage"]]
+                truth["life_stage"] = decomp["life_stage"]
+                truth["char_id"]    = decomp["char_id"]
 
     def get_ram(self, snap_name):
         path = os.path.join(CAPTURES_DIR, f"{snap_name}.bin")
@@ -91,7 +126,10 @@ class MemoryAnalyzer:
         print(f"Analyzing {len(valid_snaps)} annotated snapshots...")
 
         attribute_candidates = {}
-        belief_stats = {k: {"match": 0, "mismatch": 0} for k in self.current_beliefs}
+        # Only track beliefs for fields with a known (non-None) address
+        belief_stats = {k: {"match": 0, "mismatch": 0}
+                        for k, v in self.current_beliefs.items()
+                        if v.get("addr") is not None}
 
         for name, data in valid_snaps.items():
             ram_bytes = self.get_ram(name)
@@ -100,8 +138,9 @@ class MemoryAnalyzer:
             truth = data["truth"]
 
             for attr, val in truth.items():
-                # 1. Verify current beliefs
-                if attr in self.current_beliefs:
+                # 1. Verify current beliefs (skip entries with addr=None)
+                if (attr in self.current_beliefs
+                        and self.current_beliefs[attr].get("addr") is not None):
                     is_correct, actual = self.check_belief(attr, val, ram_bytes)
                     if is_correct:
                         belief_stats[attr]["match"] += 1
@@ -565,22 +604,25 @@ class MemoryAnalyzer:
             belief = self.current_beliefs[attr]
             known_addr = belief["addr"]
             known_type = belief["type"]
-            found = next((r for r in results if r["addr"] == known_addr), None)
-            if found:
-                pct = f"{found['confidence'] * 100:.0f}%"
-                label = ("CONFIRMED (strong)"
-                         if found["confidence"] >= 1.0 and not found["near_miss"]
-                         else f"PLAUSIBLE ({pct})")
-                print(f"  Known 0x{known_addr:03X} ({known_type}): {label}")
-                try:
-                    vm_items = sorted(found["value_map"].items())
-                except TypeError:
-                    vm_items = sorted(found["value_map"].items(), key=lambda x: str(x[0]))
-                vm_str = "  ".join(f"{tv}->{nv}" for tv, nv in vm_items)
-                print(f"  Value map: {vm_str}")
+            if known_addr is None:
+                print(f"  Address not yet discovered — run divergent-care captures then re-analyze.")
             else:
-                print(f"  Known 0x{known_addr:03X} ({known_type}): NOT in candidates")
-                print(f"  (excluded as invariant, or insufficient cross-group data)")
+                found = next((r for r in results if r["addr"] == known_addr), None)
+                if found:
+                    pct = f"{found['confidence'] * 100:.0f}%"
+                    label = ("CONFIRMED (strong)"
+                             if found["confidence"] >= 1.0 and not found["near_miss"]
+                             else f"PLAUSIBLE ({pct})")
+                    print(f"  Known 0x{known_addr:03X} ({known_type}): {label}")
+                    try:
+                        vm_items = sorted(found["value_map"].items())
+                    except TypeError:
+                        vm_items = sorted(found["value_map"].items(), key=lambda x: str(x[0]))
+                    vm_str = "  ".join(f"{tv}->{nv}" for tv, nv in vm_items)
+                    print(f"  Value map: {vm_str}")
+                else:
+                    print(f"  Known 0x{known_addr:03X} ({known_type}): NOT in candidates")
+                    print(f"  (excluded as invariant, or insufficient cross-group data)")
             print()
 
 

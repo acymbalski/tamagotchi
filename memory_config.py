@@ -13,8 +13,10 @@ MAP = {
     "stage":        {"addr": 0x05D, "type": "egg_logic"},   # Egg/Life stage tracking
 
     # --- Not yet discovered (addr=None until confirmed via analyzer.py) ---
-    # Find via: python analyzer.py --field stage  (divergent care runs, contrast Mametchi vs Tarakotchi)
-    "character":     {"addr": None, "type": "nibble"},  # creature ID nibble (0x00-0x0F)
+    # Find via: python analyzer.py --field life_stage  (captures spanning egg→adult)
+    "life_stage":    {"addr": None, "type": "nibble"},  # 0=egg_new,1=egg_init,2=baby,3=child,4=teen,5=adult,6=senior,7=dead
+    # Find via: python analyzer.py --field char_id  (divergent care runs, e.g. Mametchi vs Tarakotchi)
+    "char_id":       {"addr": None, "type": "nibble"},  # character within stage (0-indexed per stage)
     # Find via: delta analysis before/after a neglect event (hunger decay to 0)
     "care_mistakes": {"addr": None, "type": "nibble"},  # neglect counter
 }

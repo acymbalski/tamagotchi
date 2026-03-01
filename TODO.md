@@ -19,3 +19,5 @@
 - [ ] Add random left/right for game
 
 - [ ] If manual control is taken, ensure we know "where" we are before we start launching more commands
+
+- [ ] Food menu selection (Meal/Snack) persists. We will need a way to detect that cursor location
