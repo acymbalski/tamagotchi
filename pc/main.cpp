@@ -31,9 +31,12 @@
 #define MARGIN        16
 #define ICON_SIZE     12
 #define ICON_GAP      4
+#define STATS_W       160                       /* left stats panel width */
+#define LCD_XOFF      STATS_W                   /* x-shift applied to all LCD elements */
+#define ICON_SLOT_W   (LCD_DRAW_W / ICON_NUM)   /* 36px — spread icons across LCD width */
 
-#define WIN_W         420
-#define WIN_H         280
+#define WIN_W         (STATS_W + MARGIN + LCD_DRAW_W + MARGIN)   /* 480 */
+#define WIN_H         320
 
 /* ---- Global state ---- */
 static bool_t matrix_buffer[LCD_HEIGHT][LCD_WIDTH / 8] = {{0}};
@@ -140,6 +143,33 @@ static void draw_string(int x, int y, const char *s, uint8_t r, uint8_t g, uint8
             draw_char(x, y, *s, r, g, b);
             x += 12; // 5*2 + 2 spacing
         }
+        s++;
+    }
+}
+
+/* Small font — each glyph pixel is 1x1. Each char cell is 6px wide, 7px tall. */
+static void draw_char_small(int x, int y, char c, uint8_t r, uint8_t g, uint8_t b) {
+    int idx = 0;
+    if (c >= '0' && c <= '9') idx = (c - '0') + 1;
+    else if (c == ':') idx = 11;
+    else if (c >= 'A' && c <= 'Z') idx = (c - 'A') + 13;
+    else if (c >= 'a' && c <= 'z') idx = (c - 'a') + 13;
+    else if (c == '*') { /* draw a 3x3 dot cluster */ idx = 0; }
+    else return;
+    SDL_SetRenderDrawColor(renderer, r, g, b, 255);
+    for (int row = 0; row < 7; row++) {
+        uint8_t bits = font_data[idx][row];
+        for (int col = 0; col < 5; col++) {
+            if (bits & (1 << (4 - col)))
+                SDL_RenderDrawPoint(renderer, x + col, y + row);
+        }
+    }
+}
+static void draw_string_small(int x, int y, const char *s, uint8_t r, uint8_t g, uint8_t b) {
+    while (*s) {
+        if (*s == ' ') { x += 4; s++; continue; }
+        draw_char_small(x, y, *s, r, g, b);
+        x += 6; /* 5px glyph + 1px gap */
         s++;
     }
 }
@@ -312,47 +342,127 @@ static void hal_play_frequency(bool_t en) {
     /* no audio in PC build */
 }
 
+/* ---- Left stats panel ---- */
+static void draw_stats_panel(void) {
+    /* Panel background */
+    SDL_Rect bg = { 0, 0, STATS_W, WIN_H };
+    SDL_SetRenderDrawColor(renderer, 12, 12, 22, 255);
+    SDL_RenderFillRect(renderer, &bg);
+
+    /* Right-edge separator */
+    SDL_SetRenderDrawColor(renderer, 55, 55, 80, 255);
+    SDL_RenderDrawLine(renderer, STATS_W - 1, 0, STATS_W - 1, WIN_H);
+
+    int x = 10, y = MARGIN;
+    const int LH = 18; /* line height */
+    const uint8_t LC = 130; /* label colour (grey) */
+
+    /* Helper: draw "LABEL: value" where value colour varies */
+    #define STAT_ROW(label, valstr, vr, vg, vb) \
+        draw_string_small(x, y, label, LC, LC, LC+20); \
+        draw_string_small(x + 28, y, valstr, vr, vg, vb); \
+        y += LH;
+
+    draw_string_small(x, y, "LIVE STATS", 160, 160, 200);
+    y += LH - 2;
+    SDL_SetRenderDrawColor(renderer, 45, 45, 65, 255);
+    SDL_RenderDrawLine(renderer, x, y, STATS_W - 12, y);
+    y += 6;
+
+    char buf[16];
+
+    uint8_t hunger = getTamaHunger();
+    sprintf(buf, "%d/4", hunger);
+    STAT_ROW("HNG:", buf, hunger < 2 ? 255 : 220, hunger < 2 ? 70 : 220, hunger < 2 ? 70 : 220);
+
+    uint8_t happy = getTamaHappiness();
+    sprintf(buf, "%d/4", happy);
+    STAT_ROW("HPY:", buf, happy < 2 ? 255 : 220, happy < 2 ? 70 : 220, happy < 2 ? 70 : 220);
+
+    uint8_t wgt_ones = readMemory(MEM_LOC_WEIGHT);
+    uint8_t wgt_tens = readMemory(MEM_LOC_WEIGHT + 1);
+    sprintf(buf, "%doz", wgt_tens * 10 + wgt_ones);
+    STAT_ROW("WGT:", buf, 220, 220, 220);
+
+    sprintf(buf, "%dyr", readMemory(MEM_LOC_AGE));
+    STAT_ROW("AGE:", buf, 220, 220, 220);
+
+    uint8_t poop = getTamaPoop();
+    sprintf(buf, "%d", poop);
+    STAT_ROW("POO:", buf, poop > 0 ? 255 : 220, poop > 0 ? 140 : 220, poop > 0 ? 40 : 220);
+
+    bool sick = isTamaSick();
+    STAT_ROW("SCK:", sick ? "YES" : "NO", sick ? 255 : 80, sick ? 80 : 200, sick ? 80 : 80);
+
+    bool sleeping = isTamaSleeping();
+    STAT_ROW("SLP:", sleeping ? "YES" : "NO", sleeping ? 180 : 220, sleeping ? 180 : 220, sleeping ? 255 : 220);
+
+    bool attn = (readMemory(MEM_LOC_ATTENTION) != 0);
+    STAT_ROW("ATN:", attn ? "YES!" : "NO", attn ? 255 : 80, attn ? 200 : 200, attn ? 0 : 80);
+
+    uint8_t disc = readMemory(MEM_LOC_DISCIPLINE);
+    sprintf(buf, "%d", disc);
+    STAT_ROW("DSC:", buf, 220, 220, 220);
+
+    #undef STAT_ROW
+
+    /* Speed / babysitter divider */
+    y += 4;
+    SDL_SetRenderDrawColor(renderer, 45, 45, 65, 255);
+    SDL_RenderDrawLine(renderer, x, y, STATS_W - 12, y);
+    y += 6;
+
+    const char* speedNames[] = {"1X", "10X", "TURBO"};
+    draw_string_small(x, y, "SPD:", LC, LC, LC + 20);
+    draw_string_small(x + 28, y, speedNames[speedIndex], 255, 255, 255);
+    y += LH;
+
+    draw_string_small(x, y, "BBY:", LC, LC, LC + 20);
+    if (currentIntent != INACTIVE)
+        draw_string_small(x + 28, y, "ON",  80, 255, 80);
+    else
+        draw_string_small(x + 28, y, "OFF", 255, 80, 80);
+    y += LH;
+
+    if (isPaused) {
+        y += 6;
+        /* Blinking PAUSED label — visible on every render, distinct colour */
+        draw_string_small(x, y, "** PAUSED **", 255, 200, 0);
+    }
+}
+
 /* ---- UI rendering for investigation ---- */
 static void draw_status_overlay(void) {
-    int y = MARGIN + LCD_DRAW_H + ICON_SIZE + 24;
-    
-    // Background for status
-    SDL_Rect bg = { 0, y - 10, WIN_W, WIN_H - (y - 10) };
+    /* Start below icon labels — icon bottom y=164+12=176, labels ~187, leave gap */
+    int y = MARGIN + LCD_DRAW_H + ICON_SIZE + 48;
+    const int lx = MARGIN + LCD_XOFF;  /* left edge of LCD column */
+
+    /* Background for status bar */
+    SDL_Rect bg = { STATS_W, y - 8, WIN_W - STATS_W, WIN_H - (y - 8) };
     SDL_SetRenderDrawColor(renderer, 20, 20, 20, 255);
     SDL_RenderFillRect(renderer, &bg);
 
-    // Speed Indicator
-    draw_string(MARGIN, y, "SPEED:", 180, 180, 180);
-    const char* speedNames[] = {"1X", "10X", "TURBO"};
-    draw_string(MARGIN + 80, y, speedNames[speedIndex], 255, 255, 255);
-
-    // Snapshot Interval
-    draw_string(MARGIN + 140, y, "SNAP:", 180, 180, 180);
+    /* Snapshot interval (the one status item that stays here) */
+    draw_string(lx, y, "SNAP:", 180, 180, 180);
     char snapBuf[16];
     if (autoSnapshotMins > 0) {
         sprintf(snapBuf, "%dM", autoSnapshotMins);
-        draw_string(MARGIN + 200, y, snapBuf, 255, 255, 255);
+        draw_string(lx + 72, y, snapBuf, 255, 255, 255);
     } else {
-        draw_string(MARGIN + 200, y, "OFF", 255, 120, 120);
+        draw_string(lx + 72, y, "OFF", 255, 120, 120);
     }
 
-    // Babysitter Indicator
-    draw_string(MARGIN + 250, y, "BBY:", 180, 180, 180);
-    if (currentIntent != INACTIVE) {
-        draw_string(MARGIN + 295, y, "ON", 100, 255, 100);
-    } else {
-        draw_string(MARGIN + 295, y, "OFF", 255, 100, 100);
-    }
-
-    // Hotkeys List
+    /* Hotkey reference lines */
     y += 24;
-    SDL_SetRenderDrawColor(renderer, 80, 80, 80, 255);
-    SDL_RenderDrawLine(renderer, 0, y, WIN_W, y);
-    y += 12;
-    
-    draw_string(MARGIN, y, "ARROWS:BTNS  F:SPD  S:SAVE  []:SNAP", 200, 200, 150);
+    SDL_SetRenderDrawColor(renderer, 60, 60, 60, 255);
+    SDL_RenderDrawLine(renderer, STATS_W, y, WIN_W, y);
+    y += 10;
+
+    draw_string(lx, y, "ARROWS:BTNS  F:SPD  S:SAVE  []:SNAP", 190, 190, 140);
     y += 18;
-    draw_string(MARGIN, y, "R:RESET  K:SNAP  B:BABY  U:AGEUP  ESC:QUIT", 200, 200, 150);
+    draw_string(lx, y, "K:SNAP  B:BABY  R:RESET  U:AGEUP", 190, 190, 140);
+    y += 18;
+    draw_string(lx, y, "P:PAUSE  T:STATS  ESC:QUIT", 190, 190, 140);
 }
 
 /* ---- Screen rendering ---- */
@@ -362,43 +472,53 @@ static void hal_update_screen(void) {
 
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
+    /* LCD pixels — shifted right by LCD_XOFF */
     for (int y = 0; y < LCD_HEIGHT; y++) {
         for (int x = 0; x < LCD_WIDTH; x++) {
             uint8_t mask = 0x80 >> (x % 8);
             bool on = (matrix_buffer[y][x / 8] & mask) != 0;
 
             SDL_Rect rect = {
-                MARGIN + x * PIXEL_STRIDE,
+                MARGIN + LCD_XOFF + x * PIXEL_STRIDE,
                 MARGIN + y * PIXEL_STRIDE,
                 PIXEL_SIZE,
                 PIXEL_SIZE
             };
 
-            if (on) {
-                SDL_SetRenderDrawColor(renderer, 0, 0, 140, 255);
-            } else {
-                SDL_SetRenderDrawColor(renderer, 0, 0, 140, 20);
-            }
+            SDL_SetRenderDrawColor(renderer, 0, 0, 140, on ? 255 : 20);
             SDL_RenderFillRect(renderer, &rect);
         }
     }
 
-    /* Icons row below LCD */
+    /* Icons — spread evenly across LCD width (ICON_SLOT_W = 36px each) */
+    static const char* icon_labels[ICON_NUM] = {
+        "FOOD", "LGHT", "GAME", "MED", "BATH", "STAT", "DISC", "ATTN"
+    };
     int icon_y = MARGIN + LCD_DRAW_H + ICON_GAP;
     for (int i = 0; i < ICON_NUM; i++) {
-        SDL_Rect rect = {
-            MARGIN + i * (ICON_SIZE + 4),
-            icon_y,
-            ICON_SIZE,
-            ICON_SIZE
-        };
+        int slot_x = MARGIN + LCD_XOFF + i * ICON_SLOT_W;
+        int icon_x = slot_x + (ICON_SLOT_W - ICON_SIZE) / 2;
+        SDL_Rect rect = { icon_x, icon_y, ICON_SIZE, ICON_SIZE };
         if (icon_buffer[i]) {
             SDL_SetRenderDrawColor(renderer, 80, 180, 255, 255);
         } else {
             SDL_SetRenderDrawColor(renderer, 20, 40, 80, 255);
         }
         SDL_RenderFillRect(renderer, &rect);
+
+        /* Label centred in the slot */
+        int lbl_len = (int)strlen(icon_labels[i]);
+        int lbl_w = lbl_len * 6;
+        int lbl_x = slot_x + (ICON_SLOT_W - lbl_w) / 2;
+        int lbl_y = icon_y + ICON_SIZE + 3;
+        uint8_t lr = icon_buffer[i] ? 255 : 130;
+        uint8_t lg = icon_buffer[i] ? 220 : 130;
+        uint8_t lb = icon_buffer[i] ? 80  : 100;
+        draw_string_small(lbl_x, lbl_y, icon_labels[i], lr, lg, lb);
     }
+
+    /* Stats panel (left column) */
+    draw_stats_panel();
 
     draw_status_overlay();
 
@@ -505,6 +625,24 @@ static int hal_handler(void) {
             case SDLK_u:
                 forceAgeUp();
                 printf("[cheat] forceAgeUp: age now %d\n", readMemory(MEM_LOC_AGE));
+                fflush(stdout);
+                break;
+
+            /* Pause / unpause */
+            case SDLK_p:
+                isPaused = !isPaused;
+                printf("[pause] %s\n", isPaused ? "PAUSED" : "RESUMED");
+                fflush(stdout);
+                break;
+
+            /* Quick stats: jump menu cursor to Stats and open it */
+            case SDLK_t:
+                setMemory(MEM_LOC_MENU, MENU_STATS);
+                hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+                simulatingButtons = true;
+                manualButtonControl = false;
+                buttonReleaseCounter = 3000;
+                printf("[stats] Stats menu opened\n");
                 fflush(stdout);
                 break;
 
@@ -632,7 +770,7 @@ int main(int argc, char **argv) {
     lastSaveMs = SDL_GetTicks64();
     lastSnapshotTicks = cpuState.tick_counter;
 
-    printf("[pc] Running. Keys: arrows/ZXC=buttons, F=speed, S=save, R=reset, K=snapshot, B=babysitter, U=force-age-up, Esc=quit\n");
+    printf("[pc] Running. Keys: arrows/ZXC=buttons, F=speed, S=save, R=reset, K=snapshot, B=babysitter, U=age-up, P=pause, T=stats, Esc=quit\n");
     if (investigationMode) {
         printf("[investigation] Auto-snapshot every %d mins\n", autoSnapshotMins);
     }
