@@ -15,6 +15,11 @@
 #define MEM_LOC_ATTENTION 0x02D
 #define MEM_LOC_WEIGHT 0x046
 
+// Addresses not yet discovered — 0x3FF is an out-of-bounds sentinel; reads/writes
+// will hit the bounds check in memory.cpp and safely no-op. Replace once confirmed.
+#define MEM_LOC_CHARACTER    0x3FF  // creature ID nibble — find via: analyzer.py --field stage (divergent runs)
+#define MEM_LOC_CARE_MISTAKES 0x3FF // neglect counter   — find via: delta analysis before/after hunger→0
+
 #define MENU_NONE 0x0
 #define MENU_FOOD 0x1
 #define MENU_LIGHT 0x2
@@ -39,6 +44,9 @@ extern bool ntpDisabled;
 bool isTamaUnstartedEgg();
 bool isTamaEgg();
 bool isTamaSleeping();
+
+void forceAgeUp();
+void setCharacter(uint8_t id);
 
 uint8_t getTamaHunger();
 uint8_t getTamaHappiness();

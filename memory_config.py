@@ -1,16 +1,22 @@
 # Tamagotchi Memory Map - Source of Truth
 
 MAP = {
-    "hunger":     {"addr": 0x040, "type": "level"},       # 0-F scaled to 0-4
-    "happy":      {"addr": 0x041, "type": "level"},       # 0-F scaled to 0-4
-    "discipline": {"addr": 0x043, "type": "nibble"},      # Raw nibble
-    "attention":  {"addr": 0x02D, "type": "bool"},        # Non-zero = needs attention
-    "poop":       {"addr": 0x04D, "type": "nibble"},      # Count of poops
-    "sick":       {"addr": 0x048, "type": "bool_8"},      # >= 8 is sick
-    "sleeping":   {"addr": 0x04A, "type": "sleep_logic"}, # 8-F is sleeping
-    "age":        {"addr": 0x054, "type": "nibble"},      # Age in years
-    "weight":     {"addr": 0x046, "type": "bcd"},         # Weight in oz
-    "stage":      {"addr": 0x05D, "type": "egg_logic"},   # Egg/Life stage tracking
+    "hunger":       {"addr": 0x040, "type": "level"},       # 0-F scaled to 0-4
+    "happy":        {"addr": 0x041, "type": "level"},       # 0-F scaled to 0-4
+    "discipline":   {"addr": 0x043, "type": "nibble"},      # Raw nibble
+    "attention":    {"addr": 0x02D, "type": "bool"},        # Non-zero = needs attention
+    "poop":         {"addr": 0x04D, "type": "nibble"},      # Count of poops
+    "sick":         {"addr": 0x048, "type": "bool_8"},      # >= 8 is sick
+    "sleeping":     {"addr": 0x04A, "type": "sleep_logic"}, # 8-F is sleeping
+    "age":          {"addr": 0x054, "type": "nibble"},      # Age in years
+    "weight":       {"addr": 0x046, "type": "bcd"},         # Weight in oz
+    "stage":        {"addr": 0x05D, "type": "egg_logic"},   # Egg/Life stage tracking
+
+    # --- Not yet discovered (addr=None until confirmed via analyzer.py) ---
+    # Find via: python analyzer.py --field stage  (divergent care runs, contrast Mametchi vs Tarakotchi)
+    "character":     {"addr": None, "type": "nibble"},  # creature ID nibble (0x00-0x0F)
+    # Find via: delta analysis before/after a neglect event (hunger decay to 0)
+    "care_mistakes": {"addr": None, "type": "nibble"},  # neglect counter
 }
 
 def decode_nibble(mem, addr):
@@ -22,8 +28,9 @@ def decode_nibble(mem, addr):
 def get_value(mem, key):
     config = MAP.get(key)
     if not config: return None
-    
+
     addr = config["addr"]
+    if addr is None: return None  # address not yet discovered
     ctype = config["type"]
     
     if ctype == "nibble":

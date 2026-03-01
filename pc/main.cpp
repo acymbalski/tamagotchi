@@ -352,7 +352,7 @@ static void draw_status_overlay(void) {
     
     draw_string(MARGIN, y, "ARROWS:BTNS  F:SPD  S:SAVE  []:SNAP", 200, 200, 150);
     y += 18;
-    draw_string(MARGIN, y, "R:RESET  K:SNAP  B:BABY  ESC:QUIT", 200, 200, 150);
+    draw_string(MARGIN, y, "R:RESET  K:SNAP  B:BABY  U:AGEUP  ESC:QUIT", 200, 200, 150);
 }
 
 /* ---- Screen rendering ---- */
@@ -501,6 +501,13 @@ static int hal_handler(void) {
                 perform_reset();
                 break;
 
+            /* Cheat: force age-up (bumps age counter; zeros care_mistakes once addr known) */
+            case SDLK_u:
+                forceAgeUp();
+                printf("[cheat] forceAgeUp: age now %d\n", readMemory(MEM_LOC_AGE));
+                fflush(stdout);
+                break;
+
             default:
                 break;
             }
@@ -625,7 +632,7 @@ int main(int argc, char **argv) {
     lastSaveMs = SDL_GetTicks64();
     lastSnapshotTicks = cpuState.tick_counter;
 
-    printf("[pc] Running. Keys: arrows/ZXC=buttons, F=speed, S=save, R=reset, K=snapshot, B=babysitter, Esc=quit\n");
+    printf("[pc] Running. Keys: arrows/ZXC=buttons, F=speed, S=save, R=reset, K=snapshot, B=babysitter, U=force-age-up, Esc=quit\n");
     if (investigationMode) {
         printf("[investigation] Auto-snapshot every %d mins\n", autoSnapshotMins);
     }

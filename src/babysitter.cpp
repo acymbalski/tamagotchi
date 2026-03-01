@@ -476,6 +476,33 @@ bool setTimeViaNTP()
     return true; // Return true if time was successfully set
 }
 
+void forceAgeUp()
+{
+    uint8_t age = readMemory(MEM_LOC_AGE);
+    setMemory(MEM_LOC_AGE, age + 1);
+    Serial.print("forceAgeUp: age ");
+    Serial.print(age);
+    Serial.print(" -> ");
+    Serial.println(age + 1);
+
+#if MEM_LOC_CARE_MISTAKES != 0x3FF
+    // Zero care mistakes so the ROM picks the best-quality character at evolution.
+    setMemory(MEM_LOC_CARE_MISTAKES, 0);
+    Serial.println("forceAgeUp: care_mistakes zeroed");
+#endif
+}
+
+void setCharacter(uint8_t id)
+{
+#if MEM_LOC_CHARACTER != 0x3FF
+    setMemory(MEM_LOC_CHARACTER, id);
+    Serial.print("setCharacter: -> 0x");
+    Serial.println(id, HEX);
+#else
+    Serial.println("setCharacter: MEM_LOC_CHARACTER not yet discovered — no-op");
+#endif
+}
+
 void babysitterLoop()
 {
     if (currentIntent == INACTIVE) return;

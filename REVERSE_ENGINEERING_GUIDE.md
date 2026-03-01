@@ -62,10 +62,17 @@ This document provides instructions for using the Tamagotchi Investigation Lab (
 - **Hunger/Happy**: `0x040`/`0x041` - *Doubted* (Scaling logic `val // 4` is likely incomplete).
 
 ### Major Gaps
-1.  **Life Stages**: We have official names, but we do not know the memory address that stores the creature ID.
-2.  **Screens**: We need to find the address that identifies which menu is currently open (Main, Stats, Game, etc.).
-3.  **Hunger Scaling**: Address `0x040` is correct, but we need to determine the exact bit-thresholds for the 4 hearts.
-4.  **Angel/Death**: Identify the "Dead" flag triggered when the Tama passes away.
+1.  **Character ID** (`MEM_LOC_CHARACTER`, currently `0x3FF` sentinel): A nibble encoding which specific creature this is (Mametchi, Tarakotchi, etc.). The ROM writes this during evolution. **How to find**: Collect two runs with divergent care reaching the same adult stage; annotate with specific Stage values (e.g., "Mametchi (Adult)" vs "Tarakotchi (Adult)"); run `python analyzer.py --field stage`. The nibble address that differs between the two groups is the character ID. Expected to be near the `0x040`–`0x060` cluster.
+2.  **Care Mistakes Counter** (`MEM_LOC_CARE_MISTAKES`, currently `0x3FF` sentinel): Increments each time the Tama is neglected (hunger or happiness reaches 0 and goes unattended). Primary driver of character quality on P1. **How to find**: Delta analysis — snapshot immediately before and after an observed neglect event (hunger decays to 0). The nibble(s) that incremented across that pair are candidates. Cross-validate by stacking well-cared captures vs neglected captures: the address separating the two groups cleanly is the counter.
+3.  **Evolution Trigger Flag**: The ROM likely sets a flag or reacts to the age counter crossing a threshold. If found, this can be tripped directly without touching the age counter. **How to find**: Compare captures from just before vs just after an observed evolution event — the nibble(s) that change at that boundary are evolution-related.
+4.  **Screens**: We need to find the address that identifies which menu is currently open (Main, Stats, Game, etc.).
+5.  **Hunger Scaling**: Address `0x040` is correct, but we need to determine the exact bit-thresholds for the 4 hearts.
+6.  **Angel/Death**: Identify the "Dead" flag triggered when the Tama passes away.
+
+### Lifecycle Control — Two-Layer Model
+Forcing an age-up requires both layers:
+- **Trigger**: Bump `0x054` (age) past the stage threshold — `forceAgeUp()` in babysitter does this. Press `U` in the PC sim.
+- **Outcome**: Pre-write care history (zero `MEM_LOC_CARE_MISTAKES`) before the ROM's evolution subroutine reads it, OR write character ID directly after evolution fires. Both paths are implemented in `forceAgeUp()` and `setCharacter()` in `babysitter.cpp` but are no-ops until the addresses are confirmed.
 
 ---
 
