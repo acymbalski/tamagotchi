@@ -94,3 +94,11 @@
 - [ ] **Validate age address (0x054)** — game rules confirm: age increments on wakeup (one
       year per day). Cross-check that captured age values align with wakeup events, not
       real-time elapsed. The current 100% confidence is strong but based on a limited dataset.
+
+- [ ] **Investigate Sickness vs. Dying Counter** — Sickness appears to be a multi-address
+      state. Investigate if `0x048` and `0x049` represent a level and a "time until death"
+      counter, or if there is another "dying" flag. Display the raw values of these addresses
+      in our PC sim.
+
+- [ ] **Develop Memory Editor** — Add a tool or feature to poke values directly into RAM
+      while the sim is running. (Target: poke `0x050` to verify character ID overrides).

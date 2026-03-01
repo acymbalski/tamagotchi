@@ -6,12 +6,12 @@ MAP = {
     "discipline":   {"addr": 0x043, "type": "level"},       # 0-F scaled to 0-4
     "attention":    {"addr": 0x02D, "type": "bool"},        # Non-zero = needs attention
     "poop":         {"addr": 0x04D, "type": "nibble"},      # Count of poops
-    "sick":         {"addr": 0x048, "type": "bool_8"},      # >= 8 is sick
+    "sick":         {"addr": 0x049, "type": "level"},       # 0-F scaled to 0-4
     "sleeping":     {"addr": 0x04A, "type": "sleep_logic"}, # 8-F is sleeping
     "age":          {"addr": 0x054, "type": "nibble"},      # Age in years
     "weight":       {"addr": 0x046, "type": "bcd"},         # Weight in oz
     "lifecycle":    {"addr": 0x05D, "type": "stage_logic"}, # Lifecycle stage (0, 1, 2, 4...)
-    "character":    {"addr": None,  "type": "nibble"},      # Character within stage
+    "character":    {"addr": 0x050, "type": "nibble"},      # Character within stage (0x050 correlates well)
 
     # --- Not yet discovered (addr=None until confirmed via analyzer.py) ---
     # Find via: python analyzer.py --field life_stage  (captures spanning egg→adult)

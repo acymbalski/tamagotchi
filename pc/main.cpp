@@ -401,8 +401,9 @@ static void draw_stats_panel(void) {
     sprintf(buf, "%d", poop);
     STAT_ROW("POO:", buf, poop > 0 ? 255 : 220, poop > 0 ? 140 : 220, poop > 0 ? 40 : 220);
 
-    bool sick = isTamaSick();
-    STAT_ROW("SCK:", sick ? "YES" : "NO", sick ? 255 : 80, sick ? 80 : 200, sick ? 80 : 80);
+    uint8_t sick = getTamaSickness();
+    sprintf(buf, "%d/4", sick);
+    STAT_ROW("SCK:", buf, sick > 0 ? 255 : 80, sick > 0 ? 80 : 200, sick > 0 ? 80 : 80);
 
     bool sleeping = isTamaSleeping();
     STAT_ROW("SLP:", sleeping ? "YES" : "NO", sleeping ? 180 : 220, sleeping ? 180 : 220, sleeping ? 255 : 220);
@@ -410,23 +411,26 @@ static void draw_stats_panel(void) {
     bool attn = (readMemory(MEM_LOC_ATTENTION) != 0);
     STAT_ROW("ATN:", attn ? "YES!" : "NO", attn ? 255 : 80, attn ? 200 : 200, attn ? 0 : 80);
 
-    uint8_t disc = readMemory(MEM_LOC_DISCIPLINE);
-    sprintf(buf, "%d", disc);
+    uint8_t disc = getTamaDiscipline();
+    sprintf(buf, "%d/4", disc);
     STAT_ROW("DSC:", buf, 220, 220, 220);
 
     {
-        uint8_t h_ones = readMemory(0x14);
-        uint8_t h_tens = readMemory(0x15);
+        uint8_t sec_ones = readMemory(0x10);
+        uint8_t sec_tens = readMemory(0x11);
         uint8_t min_ones = readMemory(0x12);
         uint8_t min_tens = readMemory(0x13);
+        uint8_t h_ones = readMemory(0x14);
+        uint8_t h_tens = readMemory(0x15);
         uint8_t h24 = (h_tens << 4) | h_ones;
         uint8_t tmin = (uint8_t)(min_tens * 10 + min_ones);
+        uint8_t tsec = (uint8_t)(sec_tens * 10 + sec_ones);
         uint8_t h12 = h24;
         const char* ap = "AM";
         if (h24 == 0) h12 = 12;
         else if (h24 == 12) { ap = "PM"; }
         else if (h24 > 12) { h12 = (uint8_t)(h24 - 12); ap = "PM"; }
-        sprintf(buf, "%d:%02d%s", h12, tmin, ap);
+        sprintf(buf, "%d:%02d:%02d%s", h12, tmin, tsec, ap);
         STAT_ROW("CLK:", buf, 220, 220, 180);
     }
 

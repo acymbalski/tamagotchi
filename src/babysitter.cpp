@@ -67,11 +67,22 @@ uint8_t getTamaPoop()
     // return the value of MEM_LOC_POOP
     return readMemory(MEM_LOC_POOP);
 }
+uint8_t getTamaSickness()
+{
+    // returns tama's sickness level (0-4)
+    uint8_t sick = readMemory(MEM_LOC_SICK);
+    return (sick == 0xF) ? 4 : sick / 4;
+}
+uint8_t getTamaDiscipline()
+{
+    // returns tama's discipline level (0-4)
+    uint8_t disc = readMemory(MEM_LOC_DISCIPLINE);
+    return (disc == 0xF) ? 4 : disc / 4;
+}
 bool isTamaSick()
 {
-    // tama is sick if MEM_LOC_SICK is >= 0x08
-    uint8_t sickStatus = readMemory(MEM_LOC_SICK);
-    return sickStatus >= 0x08;
+    // returns true if tama is sick (non-zero level)
+    return readMemory(MEM_LOC_SICK) != 0;
 }
 
 bool isTamaUnstartedEgg()
@@ -197,9 +208,14 @@ void giveTamaMedicine()
     manualButtonControl = true;
     for (int i = 0; i < 3000; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+    
+    // Wait for medicine animation to finish
     for (int i = 0; i < 33000; i++) tamalib_mainloop_step_by_step(false);
+    
     manualButtonControl = false;
     setMemory(MEM_LOC_MENU, MENU_NONE);
+    // Note: If sickness is level-based, the babysitterLoop will trigger
+    // another dose automatically on the next check if sickness persists.
 }
 
 void playTamaGame()
@@ -555,9 +571,11 @@ void babysitterLoop()
             if (getTamaHunger() < target) setMemory(MEM_LOC_HUNGER, mem_val);
             if (getTamaHappiness() < target) setMemory(MEM_LOC_HAPPY, mem_val);
             
-            // Instantly clear poop and sickness in any FORCE level
+            // Instantly clear poop, sickness, and attention in any FORCE level
             if (getTamaPoop() > 0) setMemory(MEM_LOC_POOP, 0);
-            if (isTamaSick()) setMemory(MEM_LOC_SICK, 0);
+            setMemory(MEM_LOC_SICK, 0);
+            setMemory(MEM_LOC_SICK_SECONDARY, 0);
+            setMemory(MEM_LOC_ATTENTION, 0);
             
             return;
         }

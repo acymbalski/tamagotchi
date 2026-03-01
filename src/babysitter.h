@@ -8,7 +8,8 @@
 #define MEM_LOC_HAPPY 0x41
 #define MEM_LOC_AGE 0x54
 #define MEM_LOC_DISCIPLINE 0x43
-#define MEM_LOC_SICK 0x48
+#define MEM_LOC_SICK 0x49
+#define MEM_LOC_SICK_SECONDARY 0x48
 #define MEM_LOC_LIGHTS 0x4B
 #define MEM_LOC_POOP 0x4D
 #define MEM_LOC_MENU 0x75
@@ -61,6 +62,8 @@ void setCharacter(uint8_t id);
 uint8_t getTamaHunger();
 uint8_t getTamaHappiness();
 uint8_t getTamaPoop();
+uint8_t getTamaSickness();
+uint8_t getTamaDiscipline();
 bool isTamaSick();
 
 void hatchEgg();
