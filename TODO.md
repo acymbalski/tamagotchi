@@ -22,6 +22,10 @@
 
 - [ ] Food menu selection (Meal/Snack) persists. We will need a way to detect that cursor location
 
+- [ ] Allow a "fake" babysitter that will just literally set hunger/poop/happy values so we won't die and can sim forever
+
+- [x] Investigator - Moving forward, then back (no changes/commit) will save an annotation with a mod on "Screen" and "Stage" (as Main/Unknown)
+
 ---
 
 ## Babysitter Gaps (from game rules — see GAME_RULES.md)
