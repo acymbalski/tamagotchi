@@ -492,7 +492,7 @@ static void draw_status_overlay(void) {
     y += 10;
     draw_string_small(lx, y, "Z:FOOD  X:LGHT  C:GAME  V:MED  B:BATH  N:STAT  M:DISC", 190, 190, 140);
     y += 10;
-    draw_string_small(lx, y, "S:SAVE  R:RST  K:SNAP  U:AGE  T:STATS", 190, 190, 140);
+    draw_string_small(lx, y, "S:SAVE  L:LOAD  R:RST  K:SNAP  U:AGE  T:STATS", 190, 190, 140);
 }
 
 /* ---- Screen rendering ---- */
@@ -670,6 +670,13 @@ static int hal_handler(void) {
 
             case SDLK_s:
                 pc_save_state(&cpuState);
+                break;
+
+            case SDLK_l:
+                if (pc_load_state(&cpuState)) {
+                    cpu_sync_ref_timestamp();
+                    lastSnapshotTicks = cpuState.tick_counter;
+                }
                 break;
 
             case SDLK_r:
