@@ -147,26 +147,26 @@ void tamalib_mainloop(void)
 void tamalib_mainloop_step_by_step(bool_t isPaused)
 {
   timestamp_t ts;
+  static uint32_t handler_timer = 0;
 
-  if (!g_hal->handler()) {
-    //tamalib_step();
+  // Poll handler only every 1024 cycles (~30 times/sec @ 32kHz)
+  // TODO: Review this later!
+  if ((handler_timer++ & 0x3FF) == 0) {
+    if (g_hal->handler()) return;
+  }
 
   if (!isPaused && exec_mode == EXEC_MODE_RUN)
   {
     if (cpu_step()) {
-    exec_mode = EXEC_MODE_PAUSE;
-    step_depth = cpu_get_depth();
+      exec_mode = EXEC_MODE_PAUSE;
+      step_depth = cpu_get_depth();
     }
   }
 
-
-    /* Update the screen @ g_framerate fps */
-    ts = g_hal->get_timestamp();
-    
-    if (ts - screen_ts >= ts_freq/g_framerate) {
-    //if (ts - screen_ts >= ts_freq/DEFAULT_FRAMERATE) {
-      screen_ts = ts;
-      g_hal->update_screen();
-    }
+  /* Update the screen @ g_framerate fps */
+  ts = g_hal->get_timestamp();
+  if (ts - screen_ts >= ts_freq/g_framerate) {
+    screen_ts = ts;
+    g_hal->update_screen();
   }
 }

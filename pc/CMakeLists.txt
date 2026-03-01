@@ -84,7 +84,7 @@ else()
 endif()
 
 target_compile_definitions(tamagotchi_pc PRIVATE
-    TAMA_DISPLAY_FRAMERATE=3
+    TAMA_DISPLAY_FRAMERATE=30
     NOMINMAX
     _CRT_SECURE_NO_WARNINGS
 )

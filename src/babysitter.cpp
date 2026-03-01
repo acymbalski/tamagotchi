@@ -20,6 +20,7 @@ Can be set to PROACTIVE, REACTIVE, or INACTIVE
 #include "tamalib.h"
 
 BabysitterMode currentIntent = INTENT;
+ForceLevel currentForceLevel = FORCE_OFF;
 bool ntpDisabled = false;
 
 static uint32_t elapsed_check_ticks = 0; // ticks since last babysitter check
@@ -536,6 +537,30 @@ void babysitterLoop()
 
         if (isTamaEgg())
             return;
+
+        if (currentIntent == FORCE)
+        {
+            uint8_t target = 0;
+            switch (currentForceLevel) {
+                case FORCE_MIN: target = 1; break;
+                case FORCE_LOW: target = 2; break;
+                case FORCE_MED: target = 3; break;
+                case FORCE_MAX: target = 4; break;
+                default: return;
+            }
+
+            // Memory values: 0x0=0, 0x4=1, 0x8=2, 0xC=3, 0xF=4
+            uint8_t mem_val = (target == 4) ? 0x0F : (target * 4);
+            
+            if (getTamaHunger() < target) setMemory(MEM_LOC_HUNGER, mem_val);
+            if (getTamaHappiness() < target) setMemory(MEM_LOC_HAPPY, mem_val);
+            
+            // Instantly clear poop and sickness in any FORCE level
+            if (getTamaPoop() > 0) setMemory(MEM_LOC_POOP, 0);
+            if (isTamaSick()) setMemory(MEM_LOC_SICK, 0);
+            
+            return;
+        }
 
         if (currentIntent == PROACTIVE)
         {

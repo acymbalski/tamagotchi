@@ -310,8 +310,18 @@ static timestamp_t hal_get_timestamp(void) {
 }
 
 static void hal_sleep_until(timestamp_t ts) {
+    timestamp_t now = hal_get_timestamp();
+    int32_t diff = (int32_t)(ts - now);
+    if (diff <= 0) return;
+
+    // If wait is > 2ms, use Sleep to yield to OS
+    if (diff > 2000) {
+        Sleep(diff / 1000 - 1);
+    }
+
+    // Busy wait for the remaining time to maintain high precision
     while ((int32_t)(ts - hal_get_timestamp()) > 0) {
-        Sleep(1);
+        /* busy wait */
     }
 }
 
@@ -434,8 +444,12 @@ static void draw_stats_panel(void) {
     y += LH;
 
     draw_string_small(x, y, "BBY:", LC, LC, LC + 20);
-    if (currentIntent != INACTIVE)
-        draw_string_small(x + 28, y, "ON",  80, 255, 80);
+    if (currentIntent == PROACTIVE)
+        draw_string_small(x + 28, y, "AUTO",  80, 255, 80);
+    else if (currentIntent == FORCE) {
+        const char* forceNames[] = {"OFF", "MIN", "LOW", "MED", "MAX"};
+        draw_string_small(x + 28, y, forceNames[currentForceLevel], 80, 200, 255);
+    }
     else
         draw_string_small(x + 28, y, "OFF", 255, 80, 80);
     y += LH;
@@ -474,7 +488,7 @@ static void draw_status_overlay(void) {
     SDL_RenderDrawLine(renderer, STATS_W, y, WIN_W, y);
     y += 10;
 
-    draw_string_small(lx, y, "ARROWS:BTNS  Q:BABY  F:SPD  P:PAUSE  ESC:QUIT", 190, 190, 140);
+    draw_string_small(lx, y, "ARROWS:BTNS  Q:AUTO  W:FORCE  F:SPD  P:PAUSE  ESC:QUIT", 190, 190, 140);
     y += 10;
     draw_string_small(lx, y, "Z:FOOD  X:LGHT  C:GAME  V:MED  B:BATH  N:STAT  M:DISC", 190, 190, 140);
     y += 10;
@@ -593,14 +607,33 @@ static int hal_handler(void) {
                 take_snapshot();
                 break;
 
-            /* Toggle Babysitter (remapped from B to Q) */
+            /* Toggle Babysitter (AUTO mode) */
             case SDLK_q:
-                if (currentIntent == INACTIVE) {
-                    currentIntent = PROACTIVE;
-                    printf("[babysitter] ACTIVE (Proactive)\n");
-                } else {
+                if (currentIntent == PROACTIVE) {
                     currentIntent = INACTIVE;
                     printf("[babysitter] INACTIVE\n");
+                } else {
+                    currentIntent = PROACTIVE;
+                    printf("[babysitter] AUTO (Proactive)\n");
+                }
+                fflush(stdout);
+                break;
+
+            /* Force Babysitter toggle */
+            case SDLK_w:
+                if (currentIntent != FORCE) {
+                    currentIntent = FORCE;
+                    currentForceLevel = FORCE_MIN;
+                } else {
+                    currentForceLevel = (ForceLevel)(currentForceLevel + 1);
+                    if (currentForceLevel > FORCE_MAX) {
+                        currentForceLevel = FORCE_OFF;
+                        currentIntent = INACTIVE;
+                    }
+                }
+                {
+                    const char* fn[] = {"OFF", "MIN", "LOW", "MED", "MAX"};
+                    printf("[babysitter] FORCE: %s\n", fn[currentForceLevel]);
                 }
                 fflush(stdout);
                 break;
@@ -797,43 +830,44 @@ int main(int argc, char **argv) {
     fflush(stdout);
 
     while (!exitRequested) {
-        tamalib_mainloop_step_by_step(isPaused ? 1 : 0);
+        for (int i = 0; i < 1024; i++) {
+            tamalib_mainloop_step_by_step(isPaused ? 1 : 0);
 
-        if (!isPaused) {
-            babysitterLoop();
-            
-            /* Auto-snapshot logic */
-            if (autoSnapshotMins > 0) {
-                uint32_t currentTicks = cpuState.tick_counter;
-                uint32_t diff;
-                if (currentTicks >= lastSnapshotTicks) {
-                    diff = currentTicks - lastSnapshotTicks;
+            if (!isPaused) {
+                babysitterLoop();
+                
+                /* Auto-snapshot logic */
+                if (autoSnapshotMins > 0) {
+                    uint32_t currentTicks = cpuState.tick_counter;
+                    uint32_t diff;
+                    if (currentTicks >= lastSnapshotTicks) {
+                        diff = currentTicks - lastSnapshotTicks;
+                    } else {
+                        diff = (0xFFFFFFFF - lastSnapshotTicks) + currentTicks + 1;
+                    }
+
+                    if (diff >= (uint32_t)(autoSnapshotMins * 60 * TICK_FREQUENCY)) {
+                        take_snapshot();
+                        lastSnapshotTicks = currentTicks;
+                    }
+                }
+            }
+
+            /* Auto-release buttons simulated by babysitter */
+            if (simulatingButtons && !manualButtonControl) {
+                if (buttonReleaseCounter > 0) {
+                    buttonReleaseCounter--;
                 } else {
-                    // Tick counter wrapped (it's a 32-bit counter in cpuState, though 
-                    // TAMA logic might wrap it sooner, TamaLIB usually keeps it linear)
-                    diff = (0xFFFFFFFF - lastSnapshotTicks) + currentTicks + 1;
-                }
-
-                // 1 min = 60 * TICK_FREQUENCY
-                if (diff >= (uint32_t)(autoSnapshotMins * 60 * TICK_FREQUENCY)) {
-                    take_snapshot();
-                    lastSnapshotTicks = currentTicks;
+                    hw_set_button(BTN_LEFT,   BTN_STATE_RELEASED);
+                    hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+                    hw_set_button(BTN_RIGHT,  BTN_STATE_RELEASED);
+                    simulatingButtons = false;
+                    printf("Simulated buttons released\n");
+                    fflush(stdout);
                 }
             }
-        }
 
-        /* Auto-release buttons simulated by babysitter */
-        if (simulatingButtons && !manualButtonControl) {
-            if (buttonReleaseCounter > 0) {
-                buttonReleaseCounter--;
-            } else {
-                hw_set_button(BTN_LEFT,   BTN_STATE_RELEASED);
-                hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
-                hw_set_button(BTN_RIGHT,  BTN_STATE_RELEASED);
-                simulatingButtons = false;
-                printf("Simulated buttons released\n");
-                fflush(stdout);
-            }
+            if (exitRequested) break;
         }
 
         /* Autosave every 2 minutes */

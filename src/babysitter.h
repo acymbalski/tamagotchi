@@ -32,13 +32,23 @@
 typedef enum {
     PROACTIVE,
     REACTIVE,
-    INACTIVE
+    INACTIVE,
+    FORCE
 } BabysitterMode;
+
+typedef enum {
+    FORCE_OFF = 0,
+    FORCE_MIN,
+    FORCE_LOW,
+    FORCE_MED,
+    FORCE_MAX
+} ForceLevel;
 
 #define INTENT PROACTIVE
 #define RESPONSIVENESS 1 // how many seconds between each babysitter check
 
 extern BabysitterMode currentIntent;
+extern ForceLevel currentForceLevel;
 extern bool ntpDisabled;
 
 bool isTamaUnstartedEgg();
