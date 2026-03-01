@@ -16,6 +16,16 @@ CAPTURES_DIR = "captures"
 ANNOTATIONS_FILE = "annotations.json"
 MEMORY_SIZE_BYTES = 0x140
 
+# Sleep windows for stage consistency inference.
+# All windows wrap midnight (sleep_start > wake_end), so: in_window = h >= start or h < end
+_SLEEP_WINDOWS = {
+    "Child":  (20, 9),   # 8pm – 9am
+    "Teen":   (21, 9),   # 9pm – 9am
+    "Adult":  (22, 9),   # 10pm – 9am
+    "Senior": (22, 9),   # 10pm – 9am
+}
+
+
 class Investigator(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -113,6 +123,11 @@ class Investigator(QMainWindow):
         ])
         self.cb_stage = add_confirmable_field("Stage:", self.combo_stage)
 
+        self.stage_hint_label = QLabel("")
+        self.stage_hint_label.setWordWrap(True)
+        self.stage_hint_label.setStyleSheet("color: #888; font-size: 10px; font-style: italic;")
+        form_layout.addWidget(self.stage_hint_label)
+
         self.edit_age = QLineEdit()
         self.cb_age = add_confirmable_field("Age (years):", self.edit_age)
 
@@ -188,6 +203,44 @@ class Investigator(QMainWindow):
             edit.textChanged.connect(self.highlight_discrepancies)
         for combo in [self.combo_attention, self.combo_sick, self.combo_sleeping]:
             combo.currentIndexChanged.connect(self.highlight_discrepancies)
+
+        # Stage hint: re-evaluate whenever sleeping or time changes
+        self.combo_sleeping.currentIndexChanged.connect(self.update_stage_hint)
+        self.edit_time_h.textChanged.connect(self.update_stage_hint)
+        self.combo_ampm.currentIndexChanged.connect(self.update_stage_hint)
+
+    def update_stage_hint(self):
+        """Show which stage categories are consistent with the current time + sleeping state."""
+        h_text = self.edit_time_h.text()
+        if not h_text.isdigit():
+            self.stage_hint_label.setText("")
+            return
+        h12 = int(h_text)
+        if h12 < 1 or h12 > 12:
+            self.stage_hint_label.setText("")
+            return
+        ampm = self.combo_ampm.currentText()
+        h24 = (0 if h12 == 12 else h12) if ampm == "AM" else (12 if h12 == 12 else h12 + 12)
+
+        sleeping_text = self.combo_sleeping.currentText()
+        if sleeping_text == "Unsure":
+            self.stage_hint_label.setText("")
+            return
+        sleeping = (sleeping_text == "Yes")
+
+        parts = []
+        any_bad = False
+        for cat, (ss, we) in _SLEEP_WINDOWS.items():
+            in_win = (h24 >= ss or h24 < we)   # all windows wrap midnight
+            ok = (sleeping == in_win)
+            parts.append(f"{cat}:{'OK' if ok else 'X'}")
+            if not ok:
+                any_bad = True
+
+        self.stage_hint_label.setText("  ".join(parts))
+        color = "#cc6600" if any_bad else "#448844"
+        self.stage_hint_label.setStyleSheet(
+            f"color: {color}; font-size: 10px; font-style: italic;")
 
     def load_annotations(self):
         if os.path.exists(ANNOTATIONS_FILE):
@@ -428,6 +481,10 @@ class Investigator(QMainWindow):
                         elif h24 > 12: h12 = h24 - 12; ampm = "PM"
                         pre["time"] = {"h": h12, "m": m, "s": sec, "ampm": ampm}
 
+                        # Stage/Screen
+                        pre["stage"] = memory_config.get_value(mem, "stage")
+                        pre["screen"] = "Main"
+
                         if name not in self.annotations:
                             self.annotations[name] = {"pre_populated": pre}
                         else:
@@ -496,15 +553,24 @@ class Investigator(QMainWindow):
                 self.edit_time_s.setText(f"{sec:02d}")
                 self.combo_ampm.setCurrentText(ampm)
 
+                # Screen: default to Main for now
+                self.combo_screen.setCurrentText("Main")
+
+                # Stage: check memory
+                stage = memory_config.get_value(mem, "stage")
+                if stage and stage != "Unknown":
+                    self.combo_stage.setCurrentText(stage)
+                else:
+                    self.combo_stage.setCurrentIndex(0) # "Unknown"
+
                 self.pre_populated_values = {
                     "hunger": hunger, "happy": happy, "discipline": disc,
                     "attention": attn, "poop": poop, "sick": sick,
                     "sleeping": sleep, "age": age, "weight": weight,
-                    "time": {"h": h12, "m": m, "s": sec, "ampm": ampm}
+                    "time": {"h": h12, "m": m, "s": sec, "ampm": ampm},
+                    "stage": self.combo_stage.currentText(),
+                    "screen": self.combo_screen.currentText()
                 }
-
-                if memory_config.get_value(mem, "stage") == "Egg":
-                    self.combo_stage.setCurrentText("Egg")
         except Exception as e:
             print(f"Error pre-populating: {e}")
 
@@ -580,12 +646,16 @@ class Investigator(QMainWindow):
                 pt = pre["time"]
                 guesses["t"] = f"{pt['h']}:{pt['m']:02d}:{pt['s']:02d} {pt['ampm']}"
 
-        self.annotations[name] = {
-            "truth": truth,
-            "guesses": guesses,
-            "mod": modified,
-            "notes": self.text_notes.toPlainText()
-        }
+        if not truth and not modified and not self.text_notes.toPlainText():
+            if name in self.annotations:
+                del self.annotations[name]
+        else:
+            self.annotations[name] = {
+                "truth": truth,
+                "guesses": guesses,
+                "mod": modified,
+                "notes": self.text_notes.toPlainText()
+            }
         self.save_annotations()
 
     def prev_snapshot(self):

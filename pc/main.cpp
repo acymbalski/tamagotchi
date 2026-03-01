@@ -404,6 +404,22 @@ static void draw_stats_panel(void) {
     sprintf(buf, "%d", disc);
     STAT_ROW("DSC:", buf, 220, 220, 220);
 
+    {
+        uint8_t h_ones = readMemory(0x14);
+        uint8_t h_tens = readMemory(0x15);
+        uint8_t min_ones = readMemory(0x12);
+        uint8_t min_tens = readMemory(0x13);
+        uint8_t h24 = (h_tens << 4) | h_ones;
+        uint8_t tmin = (uint8_t)(min_tens * 10 + min_ones);
+        uint8_t h12 = h24;
+        const char* ap = "AM";
+        if (h24 == 0) h12 = 12;
+        else if (h24 == 12) { ap = "PM"; }
+        else if (h24 > 12) { h12 = (uint8_t)(h24 - 12); ap = "PM"; }
+        sprintf(buf, "%d:%02d%s", h12, tmin, ap);
+        STAT_ROW("CLK:", buf, 220, 220, 180);
+    }
+
     #undef STAT_ROW
 
     /* Speed / babysitter divider */
@@ -458,11 +474,11 @@ static void draw_status_overlay(void) {
     SDL_RenderDrawLine(renderer, STATS_W, y, WIN_W, y);
     y += 10;
 
-    draw_string(lx, y, "ARROWS:BTNS  F:SPD  S:SAVE  []:SNAP", 190, 190, 140);
-    y += 18;
-    draw_string(lx, y, "K:SNAP  B:BABY  R:RESET  U:AGEUP", 190, 190, 140);
-    y += 18;
-    draw_string(lx, y, "P:PAUSE  T:STATS  ESC:QUIT", 190, 190, 140);
+    draw_string_small(lx, y, "ARROWS:BTNS  Q:BABY  F:SPD  P:PAUSE  ESC:QUIT", 190, 190, 140);
+    y += 10;
+    draw_string_small(lx, y, "Z:FOOD  X:LGHT  C:GAME  V:MED  B:BATH  N:STAT  M:DISC", 190, 190, 140);
+    y += 10;
+    draw_string_small(lx, y, "S:SAVE  R:RST  K:SNAP  U:AGE  T:STATS", 190, 190, 140);
 }
 
 /* ---- Screen rendering ---- */
@@ -551,25 +567,22 @@ static int hal_handler(void) {
                 exitRequested = true;
                 return 1;
 
-            /* Left button: left arrow or Z */
+            /* Left button: left arrow */
             case SDLK_LEFT:
-            case SDLK_z:
                 hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
                 simulatingButtons = true;
                 manualButtonControl = true;
                 break;
 
-            /* Middle button: down arrow or X */
+            /* Middle button: down arrow */
             case SDLK_DOWN:
-            case SDLK_x:
                 hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
                 simulatingButtons = true;
                 manualButtonControl = true;
                 break;
 
-            /* Right button: right arrow or C */
+            /* Right button: right arrow */
             case SDLK_RIGHT:
-            case SDLK_c:
                 hw_set_button(BTN_RIGHT, BTN_STATE_PRESSED);
                 simulatingButtons = true;
                 manualButtonControl = true;
@@ -580,8 +593,8 @@ static int hal_handler(void) {
                 take_snapshot();
                 break;
 
-            /* Investigation: Toggle Babysitter */
-            case SDLK_b:
+            /* Toggle Babysitter (remapped from B to Q) */
+            case SDLK_q:
                 if (currentIntent == INACTIVE) {
                     currentIntent = PROACTIVE;
                     printf("[babysitter] ACTIVE (Proactive)\n");
@@ -591,6 +604,15 @@ static int hal_handler(void) {
                 }
                 fflush(stdout);
                 break;
+
+            /* Menu shortcuts: Z=Food X=Lights C=Game V=Med B=Bath N=Stats M=Disc */
+            case SDLK_z: setMemory(MEM_LOC_MENU, MENU_FOOD);       hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED); simulatingButtons = true; manualButtonControl = false; buttonReleaseCounter = 3000; break;
+            case SDLK_x: setMemory(MEM_LOC_MENU, MENU_LIGHT);      hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED); simulatingButtons = true; manualButtonControl = false; buttonReleaseCounter = 3000; break;
+            case SDLK_c: setMemory(MEM_LOC_MENU, MENU_GAME);       hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED); simulatingButtons = true; manualButtonControl = false; buttonReleaseCounter = 3000; break;
+            case SDLK_v: setMemory(MEM_LOC_MENU, MENU_MEDICINE);   hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED); simulatingButtons = true; manualButtonControl = false; buttonReleaseCounter = 3000; break;
+            case SDLK_b: setMemory(MEM_LOC_MENU, MENU_CLEAN);      hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED); simulatingButtons = true; manualButtonControl = false; buttonReleaseCounter = 3000; break;
+            case SDLK_n: setMemory(MEM_LOC_MENU, MENU_STATS);      hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED); simulatingButtons = true; manualButtonControl = false; buttonReleaseCounter = 3000; break;
+            case SDLK_m: setMemory(MEM_LOC_MENU, MENU_DISCIPLINE); hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED); simulatingButtons = true; manualButtonControl = false; buttonReleaseCounter = 3000; break;
 
             case SDLK_f:
                 speedIndex = (speedIndex + 1) % 3;
@@ -654,19 +676,16 @@ static int hal_handler(void) {
         case SDL_KEYUP:
             switch (event.key.keysym.sym) {
             case SDLK_LEFT:
-            case SDLK_z:
                 hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
                 simulatingButtons = false;
                 manualButtonControl = false;
                 break;
             case SDLK_DOWN:
-            case SDLK_x:
                 hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
                 simulatingButtons = false;
                 manualButtonControl = false;
                 break;
             case SDLK_RIGHT:
-            case SDLK_c:
                 hw_set_button(BTN_RIGHT, BTN_STATE_RELEASED);
                 simulatingButtons = false;
                 manualButtonControl = false;
@@ -770,7 +789,8 @@ int main(int argc, char **argv) {
     lastSaveMs = SDL_GetTicks64();
     lastSnapshotTicks = cpuState.tick_counter;
 
-    printf("[pc] Running. Keys: arrows/ZXC=buttons, F=speed, S=save, R=reset, K=snapshot, B=babysitter, U=age-up, P=pause, T=stats, Esc=quit\n");
+    printf("[pc] Running. Keys: arrows=buttons, Q=babysitter, F=speed, P=pause, S=save, R=reset, K=snap, U=age-up, T/N=stats, Esc=quit\n");
+    printf("[pc] Menu keys: Z=food, X=lights, C=game, V=medicine, B=bath, N=stats, M=discipline\n");
     if (investigationMode) {
         printf("[investigation] Auto-snapshot every %d mins\n", autoSnapshotMins);
     }

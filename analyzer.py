@@ -163,6 +163,39 @@ class MemoryAnalyzer:
             status = "STRENGTHENED" if accuracy == 100 else "!! DOUBTED !!"
             print(f"[{status}] {attr:12}: {accuracy:3.0f}% accuracy ({stats['match']}/{total})")
 
+        print("\n--- Time/Sleep Consistency Checks ---")
+        _SLEEP_WINDOWS_ANALYSIS = {
+            3: (20, 9),   # Child: 8pm – 9am
+            4: (21, 9),   # Teen: 9pm – 9am
+            5: (22, 9),   # Adult: 10pm – 9am
+            6: (22, 9),   # Senior: 10pm – 9am
+        }
+        inconsistent_count = 0
+        for name, data in valid_snaps.items():
+            truth = data.get("truth", {})
+            life_stage = truth.get("life_stage")
+            if life_stage not in _SLEEP_WINDOWS_ANALYSIS:
+                continue
+            if "sleeping" not in truth or "time" not in truth:
+                continue
+            try:
+                parts_t = truth["time"].split(" ")
+                h12 = int(parts_t[0].split(":")[0])
+                ampm = parts_t[1]
+                h24 = (0 if h12 == 12 else h12) if ampm == "AM" else (12 if h12 == 12 else h12 + 12)
+            except Exception:
+                continue
+            ss, we = _SLEEP_WINDOWS_ANALYSIS[life_stage]
+            in_win = (h24 >= ss or h24 < we)
+            if truth["sleeping"] != in_win:
+                stage_name = truth.get("stage", f"life_stage={life_stage}")
+                action = "sleeping" if truth["sleeping"] else "awake"
+                print(f"  [WARN] {name}: {stage_name} is {action} at {truth['time']} "
+                      f"(expected {'asleep' if in_win else 'awake'})")
+                inconsistent_count += 1
+        if inconsistent_count == 0:
+            print("  All annotated time+sleep+stage combinations are consistent.")
+
         print("\n--- Discovery (Consistent Candidates) ---")
         for attr, candidates in attribute_candidates.items():
             print(f"{attr:12}: Found {len(candidates)} consistent candidates.")
