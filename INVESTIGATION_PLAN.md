@@ -28,7 +28,7 @@ The system consists of two primary components:
 ### B. Python Lab Manager (`investigator.py`)
 - **Collection Mode:**
     - Monitors the `captures/` directory.
-    - Tracks the number of snapshots; when it reaches 100, it pauses/terminates the simulator.
+    - Tracks the number of snapshots; provides real-time status of data collection.
     - Provides a button to "Spawn Turbo Sim" to start the data collection run.
 - **Annotation Mode:**
     - Displays the snapshot BMP (scaled up for visibility).
@@ -80,13 +80,13 @@ The system consists of two primary components:
 3.  Build the annotation form with auto-save logic.
 
 ### Phase 3: Analysis (Future)
-1.  Develop a script to correlate `annotations.json` values with bit-changes in the `.bin` files across the 100-snapshot set.
+1.  Develop a script to correlate `annotations.json` values with bit-changes in the `.bin` files across the collected snapshot set.
 
 ---
 
 ## 5. User Workflow
 1.  **Initialize:** Start `investigator.py`.
 2.  **Collect:** Click "Start Turbo Sim". Manually set the time in the simulator, then let it run at max speed.
-3.  **Threshold:** Once 100 snapshots are hit, the sim stops.
+3.  **Threshold:** The sim continues until manually stopped by the user once they feel they have enough data.
 4.  **Annotate:** Iterate through snapshots. For ambiguous ones, click "Investigate Live" to check menus.
 5.  **Finalize:** Annotations are saved; data is ready for memory mapping analysis.

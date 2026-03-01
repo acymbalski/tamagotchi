@@ -275,15 +275,15 @@ class Investigator(QMainWindow):
                         break
                 self.set_snapshot(target_index)
             
-            count_text = f"Captures: {len(self.snapshots)}/100 (Annotated: {annotated_count})"
+            count_text = f"Captures: {len(self.snapshots)} (Annotated: {annotated_count})"
             self.status_label.setText(count_text)
             self.capture_count_label.setText(count_text)
             
-            # Auto-pause sim if we hit 100
-            if len(self.snapshots) >= 100 and self.sim_process:
-                self.sim_process.terminate()
-                self.sim_process = None
-                self.status_label.setText("Snapshots: 100/100 (PAUSED)")
+            # Auto-pause logic removed - we want a lot now!
+            # if len(self.snapshots) >= 100 and self.sim_process:
+            #     self.sim_process.terminate()
+            #     self.sim_process = None
+            #     self.status_label.setText("Snapshots: 100/100 (PAUSED)")
 
     def set_snapshot(self, index):
         if 0 <= index < len(self.snapshots):
