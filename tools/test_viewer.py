@@ -641,11 +641,11 @@ class TestMemoryGridWidget:
         assert ADDR_COLOR_MAP[0x055][0] == "age"
 
     def test_default_visible_range(self):
-        """Default shows 8 rows."""
+        """Default shows 4 rows (32 cols each = 128 nibbles)."""
         _ensure_qapp()
         from stream_viewer import MemoryGridWidget
         grid = MemoryGridWidget()
-        assert grid.visible_rows == 8
+        assert grid.visible_rows == 4
 
     def test_expand_adds_row(self):
         """After expand, visible rows increases by 1."""
@@ -653,15 +653,15 @@ class TestMemoryGridWidget:
         from stream_viewer import MemoryGridWidget
         grid = MemoryGridWidget()
         grid.expand_one()
-        assert grid.visible_rows == 9
+        assert grid.visible_rows == 5
 
     def test_show_all(self):
-        """Show all displays 40 rows."""
+        """Show all displays 20 rows (32 cols * 20 = 640 nibbles)."""
         _ensure_qapp()
         from stream_viewer import MemoryGridWidget
         grid = MemoryGridWidget()
         grid.show_all()
-        assert grid.visible_rows == 40
+        assert grid.visible_rows == 20
 
 
 # ===========================================================================

@@ -47,11 +47,11 @@ RAM_BYTES = 320  # packed bytes (640 nibbles)
 class TamStream:
     """Read and query a .tamstream capture file."""
 
-    def __init__(self, filepath):
+    def __init__(self, filepath, progress_callback=None):
         self.filepath = filepath
         self._file = open(filepath, "rb")
         self._parse_header()
-        self._build_index()
+        self._build_index(progress_callback)
 
     def _parse_header(self):
         header = self._file.read(16)
@@ -61,15 +61,20 @@ class TamStream:
         self.start_tick = struct.unpack_from("<I", header, 6)[0]
         self.ram_nibbles = struct.unpack_from("<H", header, 10)[0]
 
-    def _build_index(self):
+    def _build_index(self, progress_callback=None):
         """Scan the file and build an index of record positions."""
         self._records_start = 16
         self._snapshot_positions = []  # (tick, file_offset) for RAM snapshots
+        self._lcd_frame_index = []     # (tick, file_offset) for LCD frames
+        self._tick_marker_ticks = []   # tick values for tick markers
+        self._annotation_records = []  # (tick, text)
+        self._button_records = []      # (tick, button_id, state)
         self._first_tick = None
         self._last_tick = None
         self._record_count = 0
 
         f = self._file
+        file_size = f.seek(0, 2)
         f.seek(self._records_start)
 
         while True:
@@ -85,7 +90,8 @@ class TamStream:
                     break
                 tick = struct.unpack_from("<I", data, 0)[0]
                 text_len = struct.unpack_from("<H", data, 4)[0]
-                f.seek(text_len, 1)
+                text_data = f.read(text_len)
+                self._annotation_records.append((tick, text_data.decode("utf-8", errors="replace")))
             elif tag in _FIXED_SIZES:
                 size = _FIXED_SIZES[tag]
                 data = f.read(size)
@@ -97,11 +103,27 @@ class TamStream:
 
             if tag == REC_RAM_SNAPSHOT:
                 self._snapshot_positions.append((tick, pos))
+            elif tag == REC_LCD_FRAME:
+                self._lcd_frame_index.append((tick, pos))
+            elif tag == REC_TICK_MARKER:
+                self._tick_marker_ticks.append(tick)
+            elif tag == REC_BUTTON_EVENT:
+                button_id = data[4]
+                state = data[5]
+                self._button_records.append((tick, button_id, state))
 
             if self._first_tick is None:
                 self._first_tick = tick
             self._last_tick = tick
             self._record_count += 1
+
+            # Progress callback every 100k records
+            if progress_callback and self._record_count % 100000 == 0:
+                pct = min(99, int(f.tell() * 100 / file_size)) if file_size > 0 else 0
+                progress_callback(pct, f"Indexing records... {self._record_count:,}")
+
+        if progress_callback:
+            progress_callback(100, f"Indexed {self._record_count:,} records")
 
     @property
     def tick_range(self):
@@ -266,11 +288,7 @@ class TamStream:
 
     def annotations(self):
         """List of (tick, text) tuples."""
-        result = []
-        for rec_type, tick, data in self.records():
-            if rec_type == REC_ANNOTATION:
-                result.append((tick, data["text"]))
-        return result
+        return list(self._annotation_records)
 
     def lcd_frames(self):
         """Generator of (tick, frame_bytes) tuples."""
@@ -280,22 +298,32 @@ class TamStream:
 
     def button_events(self):
         """Generator of (tick, button_id, state) tuples."""
-        for rec_type, tick, data in self.records():
-            if rec_type == REC_BUTTON_EVENT:
-                yield (tick, data["button_id"], data["state"])
+        return list(self._button_records)
+
+    def read_lcd_frame_at(self, file_offset):
+        """Read LCD frame data from a known file offset."""
+        f = self._file
+        f.seek(file_offset + 1 + 4)  # skip tag + tick
+        return f.read(50)
 
     def nearest_lcd_frame(self, target_tick):
-        """Return LCD frame data closest to given tick."""
-        best = None
-        best_dist = None
-        for tick, frame in self.lcd_frames():
-            dist = abs(tick - target_tick)
-            if best_dist is None or dist < best_dist:
-                best = (tick, frame)
-                best_dist = dist
-            if tick > target_tick:
-                break  # Past target, won't get closer
-        return best
+        """Return (tick, frame_bytes) closest to given tick. Uses index for speed."""
+        if not self._lcd_frame_index:
+            return None
+        # Binary search for nearest
+        import bisect
+        ticks = [t for t, _ in self._lcd_frame_index]
+        idx = bisect.bisect_left(ticks, target_tick)
+        best_idx = idx
+        if idx >= len(ticks):
+            best_idx = len(ticks) - 1
+        elif idx > 0:
+            # Check which neighbor is closer
+            if abs(ticks[idx - 1] - target_tick) <= abs(ticks[idx] - target_tick):
+                best_idx = idx - 1
+        tick, offset = self._lcd_frame_index[best_idx]
+        frame_data = self.read_lcd_frame_at(offset)
+        return (tick, frame_data)
 
     def close(self):
         if self._file:
@@ -319,7 +347,7 @@ class CachedStateTracker:
     Supports seek, step_forward, step_backward, and step_to_tick.
 
     Usage:
-        tracker = CachedStateTracker(tam_stream)
+        tracker = CachedStateTracker(tam_stream, progress_callback=None)
         tracker.seek(tick)          # Jump to any tick (uses snapshots)
         tracker.step_forward(n)     # Step forward n write-events
         tracker.step_backward(n)    # Step backward n write-events (reverts)
@@ -328,16 +356,16 @@ class CachedStateTracker:
         diff = tracker.last_diff    # Dict of {addr: (old_val, new_val)}
     """
 
-    def __init__(self, tam_stream):
+    def __init__(self, tam_stream, progress_callback=None):
         self._stream = tam_stream
         self._ram = bytearray(RAM_BYTES)
         self._write_cursor = 0   # index into _writes
         self._current_tick = 0
         self._last_diff = {}
         self._writes = []         # [(tick, addr, new_val, old_val, source, func_id), ...]
-        self._build_write_index()
+        self._build_write_index(progress_callback)
 
-    def _build_write_index(self):
+    def _build_write_index(self, progress_callback=None):
         """Scan all records and build indexed write list with old_values."""
         # Start from first snapshot to get a baseline
         if not self._stream._snapshot_positions:
@@ -349,6 +377,7 @@ class CachedStateTracker:
         running_ram = bytearray(f.read(RAM_BYTES))
 
         writes = []
+        count = 0
         for rec_type, tick, data in self._stream.records():
             if rec_type in (REC_ROM_WRITE, REC_BABYSITTER_WRITE):
                 addr = data["addr"]
@@ -376,7 +405,13 @@ class CachedStateTracker:
                 mem = data["memory"]
                 running_ram = bytearray(mem)
 
+            count += 1
+            if progress_callback and count % 200000 == 0:
+                progress_callback(None, f"Building write index... {len(writes):,} writes")
+
         self._writes = writes
+        if progress_callback:
+            progress_callback(None, f"Write index complete: {len(writes):,} writes")
 
     @property
     def current_tick(self):
@@ -418,7 +453,7 @@ class CachedStateTracker:
         return 0
 
     def seek(self, tick):
-        """Jump to any tick. Uses nearest snapshot + replay."""
+        """Jump to any tick. Uses nearest snapshot + replay from write index."""
         self._last_diff = {}
 
         # Find the nearest prior snapshot
@@ -440,14 +475,21 @@ class CachedStateTracker:
         f.seek(best_snap[1] + 1 + 4)
         self._ram = bytearray(f.read(RAM_BYTES))
 
-        # Find the write cursor position: apply all writes up to tick
-        self._write_cursor = 0
-        for i, (w_tick, addr, new_val, old_val, source, func_id) in enumerate(self._writes):
+        # Binary search for first write at or after snapshot tick
+        import bisect
+        snap_tick = best_snap[0]
+        # Find start position in writes list
+        start_idx = bisect.bisect_left([w[0] for w in self._writes], snap_tick)
+
+        # Apply writes from snapshot through target tick
+        self._write_cursor = start_idx
+        while self._write_cursor < len(self._writes):
+            w_tick = self._writes[self._write_cursor][0]
             if w_tick > tick:
                 break
-            if w_tick >= best_snap[0]:
-                self._apply_nibble(addr, new_val)
-            self._write_cursor = i + 1
+            _, addr, new_val, old_val, source, func_id = self._writes[self._write_cursor]
+            self._apply_nibble(addr, new_val)
+            self._write_cursor += 1
 
         self._current_tick = tick
 
@@ -492,8 +534,6 @@ class CachedStateTracker:
         if tick == self._current_tick:
             return
 
-        # Determine if we should step or seek
-        # If target is within 1000 writes of current position, step incrementally
         if tick > self._current_tick:
             # Step forward until we pass the target tick
             self._last_diff = {}
