@@ -62,12 +62,34 @@ class Investigator(QMainWindow):
         left_panel.addWidget(self.image_label)
         
         controls_layout = QHBoxLayout()
-        self.btn_prev = QPushButton("Previous")
+        
+        self.btn_start = QPushButton("<<")
+        self.btn_start.clicked.connect(lambda: self.set_snapshot(0))
+        self.btn_prev_100 = QPushButton("-100")
+        self.btn_prev_100.clicked.connect(lambda: self.skip_snapshot(-100))
+        self.btn_prev_10 = QPushButton("-10")
+        self.btn_prev_10.clicked.connect(lambda: self.skip_snapshot(-10))
+        self.btn_prev = QPushButton("<")
         self.btn_prev.clicked.connect(self.prev_snapshot)
-        self.btn_next = QPushButton("Next")
+        
+        self.btn_next = QPushButton(">")
         self.btn_next.clicked.connect(self.next_snapshot)
+        self.btn_next_10 = QPushButton("+10")
+        self.btn_next_10.clicked.connect(lambda: self.skip_snapshot(10))
+        self.btn_next_100 = QPushButton("+100")
+        self.btn_next_100.clicked.connect(lambda: self.skip_snapshot(100))
+        self.btn_end = QPushButton(">>")
+        self.btn_end.clicked.connect(lambda: self.set_snapshot(len(self.snapshots) - 1))
+
+        controls_layout.addWidget(self.btn_start)
+        controls_layout.addWidget(self.btn_prev_100)
+        controls_layout.addWidget(self.btn_prev_10)
         controls_layout.addWidget(self.btn_prev)
         controls_layout.addWidget(self.btn_next)
+        controls_layout.addWidget(self.btn_next_10)
+        controls_layout.addWidget(self.btn_next_100)
+        controls_layout.addWidget(self.btn_end)
+        
         left_panel.addLayout(controls_layout)
 
         self.btn_turbo = QPushButton("Start Turbo Sim (Collect)")
@@ -578,6 +600,14 @@ class Investigator(QMainWindow):
     def next_snapshot(self):
         if self.current_index < len(self.snapshots) - 1:
             self.set_snapshot(self.current_index + 1)
+
+    def skip_snapshot(self, offset):
+        new_index = self.current_index + offset
+        if new_index < 0: new_index = 0
+        if new_index >= len(self.snapshots): new_index = len(self.snapshots) - 1
+        
+        if new_index != self.current_index:
+            self.set_snapshot(new_index)
 
     def start_turbo_sim(self):
         if self.sim_process:
