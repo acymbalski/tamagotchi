@@ -757,9 +757,10 @@ static int hal_handler(void) {
                     printf("[stream] Recording stopped\n");
                 } else {
                     CreateDirectoryA(CAPTURES_DIR, NULL);
+                    CreateDirectoryA(CAPTURES_DIR "/streams", NULL);
                     cpu_get_state(&cpuState);
                     char streamPath[MAX_PATH];
-                    sprintf(streamPath, CAPTURES_DIR "/stream_%u.tamstream", cpuState.tick_counter);
+                    sprintf(streamPath, CAPTURES_DIR "/streams/stream_%u.tamstream", cpuState.tick_counter);
                     g_streamCapture = new StreamCapture();
                     g_streamCapture->start(streamPath, cpuState.tick_counter, cpuState.memory);
                     lastStreamSnapshotTick = cpuState.tick_counter;
@@ -1005,9 +1006,10 @@ int main(int argc, char **argv) {
 #ifdef STREAM_CAPTURE_ENABLED
     if (autoStream) {
         CreateDirectoryA(CAPTURES_DIR, NULL);
+        CreateDirectoryA(CAPTURES_DIR "/streams", NULL);
         cpu_get_state(&cpuState);
         static char autoStreamPath[MAX_PATH];
-        sprintf(autoStreamPath, CAPTURES_DIR "/stream_%u.tamstream", cpuState.tick_counter);
+        sprintf(autoStreamPath, CAPTURES_DIR "/streams/stream_%u.tamstream", cpuState.tick_counter);
         g_streamCapture = new StreamCapture();
         g_streamCapture->start(autoStreamPath, cpuState.tick_counter, cpuState.memory);
         lastStreamSnapshotTick = cpuState.tick_counter;
