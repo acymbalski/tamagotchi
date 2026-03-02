@@ -1,6 +1,7 @@
 #ifdef STREAM_CAPTURE_ENABLED
 
 #include "stream_capture.h"
+#include "cpu.h"
 #include <cstring>
 
 // Globals
@@ -18,6 +19,15 @@ BabysitterFuncGuard::~BabysitterFuncGuard() {
 // C-linkage wrapper for cpu.c
 extern "C" void stream_log_rom_write(uint16_t addr, uint8_t value, uint32_t tick) {
     if (g_streamCapture) g_streamCapture->logRomWrite(tick, addr, value);
+}
+
+// C-linkage wrapper for button logging — gets tick from cpu state
+extern "C" void stream_log_button(uint8_t buttonId, uint8_t state) {
+    if (g_streamCapture) {
+        cpu_state_t st;
+        cpu_get_state(&st);
+        g_streamCapture->logButtonEvent(st.tick_counter, buttonId, state);
+    }
 }
 
 // StreamCapture implementation

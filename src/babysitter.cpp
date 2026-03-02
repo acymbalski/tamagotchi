@@ -166,14 +166,26 @@ void feedTamaFood()
     setMemory(MEM_LOC_MENU, MENU_FOOD);
     for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#ifdef STREAM_CAPTURE_ENABLED
+    stream_log_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#endif
     simulatingButtons = true;
     manualButtonControl = true;
     for (int i = 0; i < 3000; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#ifdef STREAM_CAPTURE_ENABLED
+    stream_log_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#endif
     for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#ifdef STREAM_CAPTURE_ENABLED
+    stream_log_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#endif
     for (int i = 0; i < 33000; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#ifdef STREAM_CAPTURE_ENABLED
+    stream_log_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#endif
     for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
     pressRightButton();
     manualButtonControl = false;
@@ -189,18 +201,36 @@ void feedTamaSnack()
     setMemory(MEM_LOC_MENU, MENU_FOOD);
     for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#ifdef STREAM_CAPTURE_ENABLED
+    stream_log_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#endif
     simulatingButtons = true;
     manualButtonControl = true;
     for (int i = 0; i < 3000; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#ifdef STREAM_CAPTURE_ENABLED
+    stream_log_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#endif
     for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
+#ifdef STREAM_CAPTURE_ENABLED
+    stream_log_button(BTN_LEFT, BTN_STATE_PRESSED);
+#endif
     for (int i = 0; i < 3000; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
+#ifdef STREAM_CAPTURE_ENABLED
+    stream_log_button(BTN_LEFT, BTN_STATE_RELEASED);
+#endif
     for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#ifdef STREAM_CAPTURE_ENABLED
+    stream_log_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#endif
     for (int i = 0; i < 33000; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#ifdef STREAM_CAPTURE_ENABLED
+    stream_log_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#endif
     for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
     pressRightButton();
     manualButtonControl = false;
@@ -216,10 +246,16 @@ void giveTamaMedicine()
     setMemory(MEM_LOC_MENU, MENU_MEDICINE);
     for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#ifdef STREAM_CAPTURE_ENABLED
+    stream_log_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#endif
     simulatingButtons = true;
     manualButtonControl = true;
     for (int i = 0; i < 3000; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#ifdef STREAM_CAPTURE_ENABLED
+    stream_log_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#endif
     
     // Wait for medicine animation to finish
     for (int i = 0; i < 33000; i++) tamalib_mainloop_step_by_step(false);
@@ -239,18 +275,30 @@ void playTamaGame()
     setMemory(MEM_LOC_MENU, MENU_GAME);
     for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#ifdef STREAM_CAPTURE_ENABLED
+    stream_log_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#endif
     simulatingButtons = true;
     manualButtonControl = true;
     for (int i = 0; i < 3000; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#ifdef STREAM_CAPTURE_ENABLED
+    stream_log_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#endif
     for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
 
     for (int i = 0; i < 5; i++)
     {
         setMemory(0x84, 0x08); // force a win
         hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
+#ifdef STREAM_CAPTURE_ENABLED
+        stream_log_button(BTN_LEFT, BTN_STATE_PRESSED);
+#endif
         for (int j = 0; j < 42000; j++) tamalib_mainloop_step_by_step(false);
         hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
+#ifdef STREAM_CAPTURE_ENABLED
+        stream_log_button(BTN_LEFT, BTN_STATE_RELEASED);
+#endif
         for (int j = 0; j < 3000; j++) tamalib_mainloop_step_by_step(false);
     }
 
@@ -292,10 +340,16 @@ void cleanTamaPoop()
     setMemory(MEM_LOC_MENU, MENU_CLEAN);
     for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#ifdef STREAM_CAPTURE_ENABLED
+    stream_log_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#endif
     simulatingButtons = true;
     manualButtonControl = true;
     for (int i = 0; i < 3000; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#ifdef STREAM_CAPTURE_ENABLED
+    stream_log_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#endif
     for (int i = 0; i < 33000; i++) tamalib_mainloop_step_by_step(false);
     manualButtonControl = false;
     setMemory(MEM_LOC_MENU, MENU_NONE);
@@ -317,8 +371,14 @@ void hatchEgg()
     // Open the time-setting screen
     Serial.println("Hatch: opening time-set screen...");
     hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#ifdef STREAM_CAPTURE_ENABLED
+    stream_log_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#endif
     for (int i = 0; i < 3000; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#ifdef STREAM_CAPTURE_ENABLED
+    stream_log_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#endif
     for (int i = 0; i < TIMER_1HZ_PERIOD; i++) tamalib_mainloop_step_by_step(false);
 
     // Write NTP time directly into registers while the time-set screen is open
@@ -333,15 +393,27 @@ void hatchEgg()
     // Confirm the time to start the simulation
     Serial.println("Hatch: confirming time to start simulation...");
     hw_set_button(BTN_RIGHT, BTN_STATE_PRESSED);
+#ifdef STREAM_CAPTURE_ENABLED
+    stream_log_button(BTN_RIGHT, BTN_STATE_PRESSED);
+#endif
     for (int i = 0; i < 3000; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_RIGHT, BTN_STATE_RELEASED);
+#ifdef STREAM_CAPTURE_ENABLED
+    stream_log_button(BTN_RIGHT, BTN_STATE_RELEASED);
+#endif
     for (int i = 0; i < TIMER_1HZ_PERIOD; i++) tamalib_mainloop_step_by_step(false);
 
     // Close the time-set screen / return to main egg screen
     Serial.println("Hatch: closing time-set screen...");
     hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#ifdef STREAM_CAPTURE_ENABLED
+    stream_log_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#endif
     for (int i = 0; i < 3000; i++) tamalib_mainloop_step_by_step(false);
     hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#ifdef STREAM_CAPTURE_ENABLED
+    stream_log_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#endif
     for (int i = 0; i < TIMER_1HZ_PERIOD; i++) tamalib_mainloop_step_by_step(false);
 
     manualButtonControl = false;
@@ -363,6 +435,9 @@ void checkTamaStats()
 
   // press select button for 1500 cycles to open menu
   hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#ifdef STREAM_CAPTURE_ENABLED
+  stream_log_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#endif
   simulatingButtons = true;
   manualButtonControl = true;
   Serial.println("Opening stats menu...");
@@ -371,6 +446,9 @@ void checkTamaStats()
     tamalib_mainloop_step_by_step(false);
   }
   hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#ifdef STREAM_CAPTURE_ENABLED
+  stream_log_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#endif
   manualButtonControl = false;
 
   // loop for 3000 ms
@@ -381,35 +459,53 @@ void checkTamaStats()
   }
 
   hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#ifdef STREAM_CAPTURE_ENABLED
+  stream_log_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#endif
   startTime = millis();
   Serial.println("Displaying discipline stats...");
   while (millis() - startTime < msToDisplay) {
     tamalib_mainloop_step_by_step(false);
   }
   hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#ifdef STREAM_CAPTURE_ENABLED
+  stream_log_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#endif
   for (int i = 0; i < 3000; i++) {
     tamalib_mainloop_step_by_step(false);
   }
 
   // next page
   hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#ifdef STREAM_CAPTURE_ENABLED
+  stream_log_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#endif
   startTime = millis();
   Serial.println("Displaying hunger stats...");
   while (millis() - startTime < msToDisplay) {
     tamalib_mainloop_step_by_step(false);
   }
   hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#ifdef STREAM_CAPTURE_ENABLED
+  stream_log_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#endif
   for (int i = 0; i < 3000; i++) {
     tamalib_mainloop_step_by_step(false);
   }
 
   hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#ifdef STREAM_CAPTURE_ENABLED
+  stream_log_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#endif
   startTime = millis();
   Serial.println("Displaying happiness stats...");
   while (millis() - startTime < msToDisplay) {
     tamalib_mainloop_step_by_step(false);
   }
   hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#ifdef STREAM_CAPTURE_ENABLED
+  stream_log_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#endif
   for (int i = 0; i < 3000; i++) {
     tamalib_mainloop_step_by_step(false);
   }

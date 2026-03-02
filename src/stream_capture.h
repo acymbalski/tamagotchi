@@ -95,5 +95,15 @@ extern BabysitterFuncId g_currentBabysitterFunc;
 // C-linkage wrapper for cpu.c to call
 extern "C" void stream_log_rom_write(uint16_t addr, uint8_t value, uint32_t tick);
 
+// Helper: log button event with explicit tick
+inline void stream_log_button_event(uint32_t tick, uint8_t buttonId, uint8_t state) {
+    if (g_streamCapture) {
+        g_streamCapture->logButtonEvent(tick, buttonId, state);
+    }
+}
+
+// C-linkage wrapper for button logging (callable from cpu_state contexts)
+extern "C" void stream_log_button(uint8_t buttonId, uint8_t state);
+
 #endif // STREAM_CAPTURE_ENABLED
 #endif // STREAM_CAPTURE_H

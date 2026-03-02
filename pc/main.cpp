@@ -599,6 +599,9 @@ static int hal_handler(void) {
             /* Left button: left arrow */
             case SDLK_LEFT:
                 hw_set_button(BTN_LEFT, BTN_STATE_PRESSED);
+#ifdef STREAM_CAPTURE_ENABLED
+                stream_log_button(BTN_LEFT, BTN_STATE_PRESSED);
+#endif
                 simulatingButtons = true;
                 manualButtonControl = true;
                 break;
@@ -606,6 +609,9 @@ static int hal_handler(void) {
             /* Middle button: down arrow */
             case SDLK_DOWN:
                 hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#ifdef STREAM_CAPTURE_ENABLED
+                stream_log_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#endif
                 simulatingButtons = true;
                 manualButtonControl = true;
                 break;
@@ -613,6 +619,9 @@ static int hal_handler(void) {
             /* Right button: right arrow */
             case SDLK_RIGHT:
                 hw_set_button(BTN_RIGHT, BTN_STATE_PRESSED);
+#ifdef STREAM_CAPTURE_ENABLED
+                stream_log_button(BTN_RIGHT, BTN_STATE_PRESSED);
+#endif
                 simulatingButtons = true;
                 manualButtonControl = true;
                 break;
@@ -654,13 +663,19 @@ static int hal_handler(void) {
                 break;
 
             /* Menu shortcuts: Z=Food X=Lights C=Game V=Med B=Bath N=Stats M=Disc */
-            case SDLK_z: setMemory(MEM_LOC_MENU, MENU_FOOD);       hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED); simulatingButtons = true; manualButtonControl = false; buttonReleaseCounter = 3000; break;
-            case SDLK_x: setMemory(MEM_LOC_MENU, MENU_LIGHT);      hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED); simulatingButtons = true; manualButtonControl = false; buttonReleaseCounter = 3000; break;
-            case SDLK_c: setMemory(MEM_LOC_MENU, MENU_GAME);       hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED); simulatingButtons = true; manualButtonControl = false; buttonReleaseCounter = 3000; break;
-            case SDLK_v: setMemory(MEM_LOC_MENU, MENU_MEDICINE);   hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED); simulatingButtons = true; manualButtonControl = false; buttonReleaseCounter = 3000; break;
-            case SDLK_b: setMemory(MEM_LOC_MENU, MENU_CLEAN);      hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED); simulatingButtons = true; manualButtonControl = false; buttonReleaseCounter = 3000; break;
-            case SDLK_n: setMemory(MEM_LOC_MENU, MENU_STATS);      hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED); simulatingButtons = true; manualButtonControl = false; buttonReleaseCounter = 3000; break;
-            case SDLK_m: setMemory(MEM_LOC_MENU, MENU_DISCIPLINE); hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED); simulatingButtons = true; manualButtonControl = false; buttonReleaseCounter = 3000; break;
+#ifdef STREAM_CAPTURE_ENABLED
+#define MENU_BTN_LOG stream_log_button(BTN_MIDDLE, BTN_STATE_PRESSED);
+#else
+#define MENU_BTN_LOG
+#endif
+            case SDLK_z: setMemory(MEM_LOC_MENU, MENU_FOOD);       hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED); MENU_BTN_LOG simulatingButtons = true; manualButtonControl = false; buttonReleaseCounter = 3000; break;
+            case SDLK_x: setMemory(MEM_LOC_MENU, MENU_LIGHT);      hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED); MENU_BTN_LOG simulatingButtons = true; manualButtonControl = false; buttonReleaseCounter = 3000; break;
+            case SDLK_c: setMemory(MEM_LOC_MENU, MENU_GAME);       hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED); MENU_BTN_LOG simulatingButtons = true; manualButtonControl = false; buttonReleaseCounter = 3000; break;
+            case SDLK_v: setMemory(MEM_LOC_MENU, MENU_MEDICINE);   hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED); MENU_BTN_LOG simulatingButtons = true; manualButtonControl = false; buttonReleaseCounter = 3000; break;
+            case SDLK_b: setMemory(MEM_LOC_MENU, MENU_CLEAN);      hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED); MENU_BTN_LOG simulatingButtons = true; manualButtonControl = false; buttonReleaseCounter = 3000; break;
+            case SDLK_n: setMemory(MEM_LOC_MENU, MENU_STATS);      hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED); MENU_BTN_LOG simulatingButtons = true; manualButtonControl = false; buttonReleaseCounter = 3000; break;
+            case SDLK_m: setMemory(MEM_LOC_MENU, MENU_DISCIPLINE); hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED); MENU_BTN_LOG simulatingButtons = true; manualButtonControl = false; buttonReleaseCounter = 3000; break;
+#undef MENU_BTN_LOG
 
             case SDLK_f:
                 speedIndex = (speedIndex + 1) % 3;
@@ -745,16 +760,25 @@ static int hal_handler(void) {
             switch (event.key.keysym.sym) {
             case SDLK_LEFT:
                 hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
+#ifdef STREAM_CAPTURE_ENABLED
+                stream_log_button(BTN_LEFT, BTN_STATE_RELEASED);
+#endif
                 simulatingButtons = false;
                 manualButtonControl = false;
                 break;
             case SDLK_DOWN:
                 hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#ifdef STREAM_CAPTURE_ENABLED
+                stream_log_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+#endif
                 simulatingButtons = false;
                 manualButtonControl = false;
                 break;
             case SDLK_RIGHT:
                 hw_set_button(BTN_RIGHT, BTN_STATE_RELEASED);
+#ifdef STREAM_CAPTURE_ENABLED
+                stream_log_button(BTN_RIGHT, BTN_STATE_RELEASED);
+#endif
                 simulatingButtons = false;
                 manualButtonControl = false;
                 break;
@@ -924,6 +948,11 @@ int main(int argc, char **argv) {
                     hw_set_button(BTN_LEFT,   BTN_STATE_RELEASED);
                     hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED);
                     hw_set_button(BTN_RIGHT,  BTN_STATE_RELEASED);
+#ifdef STREAM_CAPTURE_ENABLED
+                    stream_log_button(BTN_LEFT, BTN_STATE_RELEASED);
+                    stream_log_button(BTN_MIDDLE, BTN_STATE_RELEASED);
+                    stream_log_button(BTN_RIGHT, BTN_STATE_RELEASED);
+#endif
                     simulatingButtons = false;
                     printf("Simulated buttons released\n");
                     fflush(stdout);
