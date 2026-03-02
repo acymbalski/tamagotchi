@@ -18,6 +18,9 @@ Can be set to PROACTIVE, REACTIVE, or INACTIVE
 #include "hw.h"
 #include "networking.h"
 #include "tamalib.h"
+#ifdef STREAM_CAPTURE_ENABLED
+#include "stream_capture.h"
+#endif
 
 BabysitterMode currentIntent = INTENT;
 ForceLevel currentForceLevel = FORCE_OFF;
@@ -156,6 +159,9 @@ static bool waitFor(Pred condition, uint32_t maxCycles, const char *description)
 
 void feedTamaFood()
 {
+#ifdef STREAM_CAPTURE_ENABLED
+    BabysitterFuncGuard _guard(BFID_FEED_FOOD);
+#endif
     Serial.println("Selecting food menu...");
     setMemory(MEM_LOC_MENU, MENU_FOOD);
     for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
@@ -176,6 +182,9 @@ void feedTamaFood()
 
 void feedTamaSnack()
 {
+#ifdef STREAM_CAPTURE_ENABLED
+    BabysitterFuncGuard _guard(BFID_FEED_SNACK);
+#endif
     Serial.println("Selecting food menu for snack...");
     setMemory(MEM_LOC_MENU, MENU_FOOD);
     for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
@@ -200,6 +209,9 @@ void feedTamaSnack()
 
 void giveTamaMedicine()
 {
+#ifdef STREAM_CAPTURE_ENABLED
+    BabysitterFuncGuard _guard(BFID_GIVE_MEDICINE);
+#endif
     Serial.println("Selecting medicine menu...");
     setMemory(MEM_LOC_MENU, MENU_MEDICINE);
     for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
@@ -220,6 +232,9 @@ void giveTamaMedicine()
 
 void playTamaGame()
 {
+#ifdef STREAM_CAPTURE_ENABLED
+    BabysitterFuncGuard _guard(BFID_PLAY_GAME);
+#endif
     Serial.println("Selecting game menu...");
     setMemory(MEM_LOC_MENU, MENU_GAME);
     for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
@@ -245,6 +260,9 @@ void playTamaGame()
 }
 void toggleLights()
 {
+#ifdef STREAM_CAPTURE_ENABLED
+    BabysitterFuncGuard _guard(BFID_TOGGLE_LIGHTS);
+#endif
   // TODO: This is a little broken for some reason
   // toggle lights
   uint8_t currentLights = readMemory(MEM_LOC_LIGHTS);
@@ -261,10 +279,15 @@ void toggleLights()
 }
 void disciplineTama()
 {
-
+#ifdef STREAM_CAPTURE_ENABLED
+    BabysitterFuncGuard _guard(BFID_DISCIPLINE);
+#endif
 }
 void cleanTamaPoop()
 {
+#ifdef STREAM_CAPTURE_ENABLED
+    BabysitterFuncGuard _guard(BFID_CLEAN_POOP);
+#endif
     Serial.println("Selecting clean menu...");
     setMemory(MEM_LOC_MENU, MENU_CLEAN);
     for (int i = 0; i < 1500; i++) tamalib_mainloop_step_by_step(false);
@@ -326,7 +349,9 @@ void hatchEgg()
 }
 void checkTamaStats()
 {
-
+#ifdef STREAM_CAPTURE_ENABLED
+    BabysitterFuncGuard _guard(BFID_CHECK_STATS);
+#endif
   uint16_t msToDisplay = 3000; // ms per page to display stats
 
   // set menu selection to stats
@@ -414,6 +439,9 @@ void setTamaPoop(uint8_t poop)
 
 void setTime(tm time)
 {
+#ifdef STREAM_CAPTURE_ENABLED
+    BabysitterFuncGuard _guard(BFID_SET_TIME);
+#endif
     // 0x0014-15 - Time (hours) (This is a flipped byte. x10 = 1AM, xA0 = 10AM, xF0 = 3PM, x01 = 4PM, x61 = 10PM, x71 = 11PM, x00 = 12PM (midnight)
     /*
     0x00 - 12PM (midnight)
@@ -495,6 +523,9 @@ bool setTimeViaNTP()
 
 void forceAgeUp()
 {
+#ifdef STREAM_CAPTURE_ENABLED
+    BabysitterFuncGuard _guard(BFID_FORCE_AGE_UP);
+#endif
     uint8_t age = readMemory(MEM_LOC_AGE);
     // BCD increment
     uint8_t lower = age & 0x0F;
@@ -526,6 +557,9 @@ void forceAgeUp()
 
 void setCharacter(uint8_t id)
 {
+#ifdef STREAM_CAPTURE_ENABLED
+    BabysitterFuncGuard _guard(BFID_SET_CHARACTER);
+#endif
 #if MEM_LOC_CHARACTER != 0x3FF
     setMemory(MEM_LOC_CHARACTER, id);
     Serial.print("setCharacter: -> 0x");
@@ -571,6 +605,9 @@ void babysitterLoop()
 
         if (currentIntent == FORCE)
         {
+#ifdef STREAM_CAPTURE_ENABLED
+            BabysitterFuncGuard _forceGuard(BFID_FORCE_MODE);
+#endif
             uint8_t target = 0;
             switch (currentForceLevel) {
                 case FORCE_MIN: target = 1; break;
