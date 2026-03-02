@@ -5,6 +5,8 @@
  */
 
 #include <windows.h>
+#include <io.h>
+#include <fcntl.h>
 // SDL2 VC dev zip: headers are in include/ directly (not include/SDL2/)
 #include <SDL.h>
 #include <stdint.h>
@@ -187,6 +189,14 @@ static int autoSnapshotMins = 0;
 static uint32_t lastSnapshotTicks = 0;
 static char loadStatePath[MAX_PATH] = {0};
 static bool forceBabysitterOff = false;
+
+/* ---- Headless Mode ---- */
+static bool headlessMode = false;
+static bool autoStream = false;
+static uint32_t headlessDurationEmuSec = 0;   // 0 = unlimited
+static uint32_t lastStatusTick = 0;
+static char saveOnExitPath[MAX_PATH] = {0};
+static uint32_t headlessStartTick = 0;
 
 #ifdef STREAM_CAPTURE_ENABLED
 static uint32_t lastStreamSnapshotTick = 0;
@@ -513,6 +523,7 @@ static void draw_status_overlay(void) {
 
 /* ---- Screen rendering ---- */
 static void hal_update_screen(void) {
+    if (headlessMode) return;
     SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);
     SDL_RenderClear(renderer);
 
@@ -581,8 +592,14 @@ static void perform_reset(void) {
     fflush(stdout);
 }
 
+static void process_headless_stdin(); // forward decl
+
 /* ---- Event handler ---- */
 static int hal_handler(void) {
+    if (headlessMode) {
+        process_headless_stdin();
+        return exitRequested ? 1 : 0;
+    }
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         switch (event.type) {
@@ -807,6 +824,77 @@ static hal_t hal = {
     .handler        = &hal_handler,
 };
 
+/* ---- Headless helpers ---- */
+static void print_status() {
+    cpu_get_state(&cpuState);
+    uint8_t hunger = readMemory(MEM_LOC_HUNGER);
+    uint8_t happy = readMemory(MEM_LOC_HAPPY);
+    uint8_t sick = readMemory(MEM_LOC_SICK);
+    uint8_t poop = readMemory(MEM_LOC_POOP);
+    uint8_t sleep_val = readMemory(0x4A);
+    uint8_t lifecycle = readMemory(0x5D);
+    uint8_t age = readMemory(MEM_LOC_AGE);
+    printf("[status] tick=%u hunger=%u happy=%u sick=%u poop=%u sleep=%u lifecycle=%u age=%u\n",
+           cpuState.tick_counter, hunger, happy, sick, poop, sleep_val, lifecycle, age);
+    fflush(stdout);
+}
+
+static void process_headless_stdin() {
+    // Non-blocking check for stdin input on Windows
+    HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD avail = 0;
+    if (!PeekNamedPipe(hStdin, NULL, 0, NULL, &avail, NULL) || avail == 0)
+        return;
+
+    char line[1024];
+    if (!fgets(line, sizeof(line), stdin))
+        return;
+
+    // Strip newline
+    size_t len = strlen(line);
+    while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r')) line[--len] = '\0';
+
+    if (_stricmp(line, "QUIT") == 0) {
+        exitRequested = true;
+    } else if (_stricmp(line, "STATUS") == 0) {
+        print_status();
+    } else if (_stricmp(line, "SNAPSHOT") == 0) {
+        take_snapshot();
+    } else if (_strnicmp(line, "PRESS ", 6) == 0) {
+        const char* btn = line + 6;
+        if (_stricmp(btn, "LEFT") == 0)        { hw_set_button(BTN_LEFT, BTN_STATE_PRESSED); }
+        else if (_stricmp(btn, "MIDDLE") == 0)  { hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED); }
+        else if (_stricmp(btn, "RIGHT") == 0)   { hw_set_button(BTN_RIGHT, BTN_STATE_PRESSED); }
+    } else if (_strnicmp(line, "RELEASE ", 8) == 0) {
+        const char* btn = line + 8;
+        if (_stricmp(btn, "LEFT") == 0)        { hw_set_button(BTN_LEFT, BTN_STATE_RELEASED); }
+        else if (_stricmp(btn, "MIDDLE") == 0)  { hw_set_button(BTN_MIDDLE, BTN_STATE_RELEASED); }
+        else if (_stricmp(btn, "RIGHT") == 0)   { hw_set_button(BTN_RIGHT, BTN_STATE_RELEASED); }
+    } else if (_strnicmp(line, "ANNOTATE ", 9) == 0) {
+#ifdef STREAM_CAPTURE_ENABLED
+        if (g_streamCapture) {
+            cpu_get_state(&cpuState);
+            g_streamCapture->logAnnotation(cpuState.tick_counter, line + 9);
+            printf("[annotation] tick=%u text=%s\n", cpuState.tick_counter, line + 9);
+            fflush(stdout);
+        }
+#endif
+    } else if (_strnicmp(line, "SAVE ", 5) == 0) {
+        cpu_get_state(&cpuState);
+        pc_save_state_to_file(&cpuState, line + 5);
+        printf("[save] %s\n", line + 5);
+        fflush(stdout);
+    } else if (_strnicmp(line, "LOAD ", 5) == 0) {
+        if (pc_load_state_from_file(&cpuState, line + 5)) {
+            cpu_sync_ref_timestamp();
+            printf("[load] %s\n", line + 5);
+        } else {
+            printf("[error] Failed to load: %s\n", line + 5);
+        }
+        fflush(stdout);
+    }
+}
+
 /* ======================================================
  * main
  * ====================================================== */
@@ -822,46 +910,76 @@ int main(int argc, char **argv) {
             investigationMode = true;
         } else if (_stricmp(argv[i], "--no-ntp") == 0) {
             ntpDisabled = true;
-        } else if (_stricmp(argv[i], "--babysitter") == 0 && i + 1 < argc) {
-            if (_stricmp(argv[++i], "off") == 0) {
-                currentIntent = INACTIVE;
-                forceBabysitterOff = true;
-            }
         } else if (_stricmp(argv[i], "--turbo") == 0) {
             speedIndex = 2; // Unlimited
+        } else if (_stricmp(argv[i], "--headless") == 0) {
+            headlessMode = true;
+        } else if (_stricmp(argv[i], "--speed") == 0 && i + 1 < argc) {
+            const char* sp = argv[++i];
+            if (_stricmp(sp, "1") == 0) speedIndex = 0;
+            else if (_stricmp(sp, "10") == 0) speedIndex = 1;
+            else if (_stricmp(sp, "turbo") == 0) speedIndex = 2;
+        } else if (_stricmp(argv[i], "--stream") == 0) {
+            autoStream = true;
+        } else if (_stricmp(argv[i], "--duration") == 0 && i + 1 < argc) {
+            headlessDurationEmuSec = (uint32_t)atoi(argv[++i]);
+        } else if (_stricmp(argv[i], "--save") == 0 && i + 1 < argc) {
+            strncpy(saveOnExitPath, argv[++i], MAX_PATH);
+        } else if (_stricmp(argv[i], "--babysitter") == 0 && i + 1 < argc) {
+            i++;
+            if (_stricmp(argv[i], "off") == 0 || _stricmp(argv[i], "INACTIVE") == 0) {
+                currentIntent = INACTIVE; forceBabysitterOff = true;
+            } else if (_stricmp(argv[i], "PROACTIVE") == 0) {
+                currentIntent = PROACTIVE;
+            } else if (_stricmp(argv[i], "REACTIVE") == 0) {
+                currentIntent = REACTIVE;
+            } else if (_stricmp(argv[i], "FORCE_LOW") == 0) {
+                currentIntent = FORCE; currentForceLevel = FORCE_LOW;
+            } else if (_stricmp(argv[i], "FORCE_MED") == 0) {
+                currentIntent = FORCE; currentForceLevel = FORCE_MED;
+            } else if (_stricmp(argv[i], "FORCE_MAX") == 0) {
+                currentIntent = FORCE; currentForceLevel = FORCE_MAX;
+            }
         }
     }
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
-        fprintf(stderr, "SDL_Init error: %s\n", SDL_GetError());
-        return 1;
-    }
+    if (headlessMode) {
+        if (SDL_Init(SDL_INIT_TIMER) != 0) {
+            fprintf(stderr, "SDL_Init (timer) error: %s\n", SDL_GetError());
+            return 1;
+        }
+    } else {
+        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
+            fprintf(stderr, "SDL_Init error: %s\n", SDL_GetError());
+            return 1;
+        }
 
-    window = SDL_CreateWindow(
-        "ArduinoGotchi PC",
-        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        WIN_W, WIN_H,
-        SDL_WINDOW_SHOWN
-    );
-    if (!window) {
-        fprintf(stderr, "SDL_CreateWindow error: %s\n", SDL_GetError());
-        SDL_Quit();
-        return 1;
-    }
+        window = SDL_CreateWindow(
+            "ArduinoGotchi PC",
+            SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+            WIN_W, WIN_H,
+            SDL_WINDOW_SHOWN
+        );
+        if (!window) {
+            fprintf(stderr, "SDL_CreateWindow error: %s\n", SDL_GetError());
+            SDL_Quit();
+            return 1;
+        }
 
-    renderer = SDL_CreateRenderer(window, -1,
-        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    if (!renderer) {
-        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
-    }
-    if (!renderer) {
-        fprintf(stderr, "SDL_CreateRenderer error: %s\n", SDL_GetError());
-        SDL_DestroyWindow(window);
-        SDL_Quit();
-        return 1;
-    }
+        renderer = SDL_CreateRenderer(window, -1,
+            SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+        if (!renderer) {
+            renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+        }
+        if (!renderer) {
+            fprintf(stderr, "SDL_CreateRenderer error: %s\n", SDL_GetError());
+            SDL_DestroyWindow(window);
+            SDL_Quit();
+            return 1;
+        }
 
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    }
 
     tamalib_register_hal(&hal);
     tamalib_set_framerate(TAMA_DISPLAY_FRAMERATE);
@@ -881,10 +999,33 @@ int main(int argc, char **argv) {
     lastSaveMs = SDL_GetTicks64();
     lastSnapshotTicks = cpuState.tick_counter;
 
-    printf("[pc] Running. Keys: arrows=buttons, Q=babysitter, F=speed, P=pause, S=save, R=reset, K=snap, U=age-up, T/N=stats, Esc=quit\n");
-    printf("[pc] Menu keys: Z=food, X=lights, C=game, V=medicine, B=bath, N=stats, M=discipline\n");
-    if (investigationMode) {
-        printf("[investigation] Auto-snapshot every %d mins\n", autoSnapshotMins);
+#ifdef STREAM_CAPTURE_ENABLED
+    if (autoStream) {
+        CreateDirectoryA("captures", NULL);
+        cpu_get_state(&cpuState);
+        static char autoStreamPath[MAX_PATH];
+        sprintf(autoStreamPath, "captures/stream_%u.tamstream", cpuState.tick_counter);
+        g_streamCapture = new StreamCapture();
+        g_streamCapture->start(autoStreamPath, cpuState.tick_counter, cpuState.memory);
+        lastStreamSnapshotTick = cpuState.tick_counter;
+        lastStreamTickMarkerTick = cpuState.tick_counter;
+        lastStreamLcdFrameTick = cpuState.tick_counter;
+        printf("[stream] started %s\n", autoStreamPath);
+    }
+#endif
+
+    lastStatusTick = cpuState.tick_counter;
+    headlessStartTick = cpuState.tick_counter;
+
+    if (headlessMode) {
+        printf("[ready]\n");
+        fflush(stdout);
+    } else {
+        printf("[pc] Running. Keys: arrows=buttons, Q=babysitter, F=speed, P=pause, S=save, R=reset, K=snap, U=age-up, T=stream, Esc=quit\n");
+        printf("[pc] Menu keys: Z=food, X=lights, C=game, V=medicine, B=bath, N=stats, M=discipline\n");
+        if (investigationMode) {
+            printf("[investigation] Auto-snapshot every %d mins\n", autoSnapshotMins);
+        }
     }
     fflush(stdout);
 
@@ -938,6 +1079,22 @@ int main(int argc, char **argv) {
                     }
                 }
 #endif
+
+                /* Headless: periodic status and duration check */
+                if (headlessMode) {
+                    uint32_t tick = cpuState.tick_counter;
+                    if (tick - lastStatusTick >= TICK_FREQUENCY) {
+                        print_status();
+                        lastStatusTick = tick;
+                    }
+                    if (headlessDurationEmuSec > 0) {
+                        if (tick - headlessStartTick >= headlessDurationEmuSec * TICK_FREQUENCY) {
+                            printf("[exit] reason=duration\n");
+                            fflush(stdout);
+                            exitRequested = true;
+                        }
+                    }
+                }
             }
 
             /* Auto-release buttons simulated by babysitter */
@@ -975,12 +1132,25 @@ int main(int argc, char **argv) {
         g_streamCapture->stop();
         delete g_streamCapture;
         g_streamCapture = nullptr;
-        printf("[stream] Recording stopped (exit)\n");
+        printf("[stream] stopped\n");
     }
 #endif
-    pc_save_state(&cpuState);
-    SDL_DestroyRenderer(renderer);
-    SDL_DestroyWindow(window);
+
+    if (saveOnExitPath[0] != '\0') {
+        cpu_get_state(&cpuState);
+        pc_save_state_to_file(&cpuState, saveOnExitPath);
+        printf("[save] %s\n", saveOnExitPath);
+    }
+
+    if (!headlessMode) {
+        pc_save_state(&cpuState);
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+    } else {
+        if (saveOnExitPath[0] == '\0') pc_save_state(&cpuState);
+        printf("[exit] reason=%s\n", headlessDurationEmuSec > 0 ? "duration" : "quit");
+    }
+    fflush(stdout);
     SDL_Quit();
     return 0;
 }
