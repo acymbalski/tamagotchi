@@ -239,16 +239,10 @@ class TamStream:
             sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
             import memory_config
             result = {}
-            for field in memory_config.MAP:
-                addr = field.get("address")
-                if addr is not None:
-                    byte_idx = addr >> 1
-                    if byte_idx < RAM_BYTES:
-                        if (addr & 1) == 0:
-                            val = (ram[byte_idx] >> 4) & 0xF
-                        else:
-                            val = ram[byte_idx] & 0xF
-                        result[field["name"]] = val
+            for name in memory_config.MAP:
+                val = memory_config.get_value(ram, name)
+                if val is not None:
+                    result[name] = val
             return result
         except ImportError:
             return {"error": "memory_config.py not found"}
