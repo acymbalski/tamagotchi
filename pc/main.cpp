@@ -19,6 +19,9 @@
 #include "babysitter.h"
 #include "input.h"
 #include "pc_savestate.h"
+#ifdef STREAM_CAPTURE_ENABLED
+#include "stream_capture.h"
+#endif
 
 /* ---- Display constants ---- */
 #define PIXEL_SIZE    8
@@ -184,6 +187,12 @@ static int autoSnapshotMins = 0;
 static uint32_t lastSnapshotTicks = 0;
 static char loadStatePath[MAX_PATH] = {0};
 static bool forceBabysitterOff = false;
+
+#ifdef STREAM_CAPTURE_ENABLED
+static uint32_t lastStreamSnapshotTick = 0;
+static uint32_t lastStreamTickMarkerTick = 0;
+static uint32_t lastStreamLcdFrameTick = 0;
+#endif
 
 /* ---- Speed cycling ---- */
 /* 0 = 1x, 1 = 10x, 2 = unlimited (0.0f) */
@@ -703,15 +712,28 @@ static int hal_handler(void) {
                 fflush(stdout);
                 break;
 
-            /* Quick stats: jump menu cursor to Stats and open it */
+            /* Stream capture toggle */
             case SDLK_t:
-                setMemory(MEM_LOC_MENU, MENU_STATS);
-                hw_set_button(BTN_MIDDLE, BTN_STATE_PRESSED);
-                simulatingButtons = true;
-                manualButtonControl = false;
-                buttonReleaseCounter = 3000;
-                printf("[stats] Stats menu opened\n");
+#ifdef STREAM_CAPTURE_ENABLED
+                if (g_streamCapture && g_streamCapture->isActive()) {
+                    g_streamCapture->stop();
+                    delete g_streamCapture;
+                    g_streamCapture = nullptr;
+                    printf("[stream] Recording stopped\n");
+                } else {
+                    CreateDirectoryA("captures", NULL);
+                    cpu_get_state(&cpuState);
+                    char streamPath[MAX_PATH];
+                    sprintf(streamPath, "captures/stream_%u.tamstream", cpuState.tick_counter);
+                    g_streamCapture = new StreamCapture();
+                    g_streamCapture->start(streamPath, cpuState.tick_counter, cpuState.memory);
+                    lastStreamSnapshotTick = cpuState.tick_counter;
+                    lastStreamTickMarkerTick = cpuState.tick_counter;
+                    lastStreamLcdFrameTick = cpuState.tick_counter;
+                    printf("[stream] Recording started: %s\n", streamPath);
+                }
                 fflush(stdout);
+#endif
                 break;
 
             default:
@@ -865,6 +887,33 @@ int main(int argc, char **argv) {
                         lastSnapshotTicks = currentTicks;
                     }
                 }
+
+#ifdef STREAM_CAPTURE_ENABLED
+                /* Stream capture periodic tasks */
+                if (g_streamCapture && g_streamCapture->isActive()) {
+                    uint32_t tick = cpuState.tick_counter;
+
+                    /* RAM snapshot every 1 emu-minute */
+                    if (tick - lastStreamSnapshotTick >= 60 * TICK_FREQUENCY) {
+                        cpu_get_state(&cpuState);
+                        g_streamCapture->logRamSnapshot(tick, cpuState.memory);
+                        lastStreamSnapshotTick = tick;
+                    }
+
+                    /* Tick marker every 1 emu-second */
+                    if (tick - lastStreamTickMarkerTick >= TICK_FREQUENCY) {
+                        g_streamCapture->logTickMarker(tick);
+                        lastStreamTickMarkerTick = tick;
+                    }
+
+                    /* LCD frame placeholder (~30fps) */
+                    if (tick - lastStreamLcdFrameTick >= TICK_FREQUENCY / 30) {
+                        uint8_t lcdPlaceholder[50] = {0};
+                        g_streamCapture->logLcdFrame(tick, lcdPlaceholder);
+                        lastStreamLcdFrameTick = tick;
+                    }
+                }
+#endif
             }
 
             /* Auto-release buttons simulated by babysitter */
@@ -892,6 +941,14 @@ int main(int argc, char **argv) {
         }
     }
 
+#ifdef STREAM_CAPTURE_ENABLED
+    if (g_streamCapture && g_streamCapture->isActive()) {
+        g_streamCapture->stop();
+        delete g_streamCapture;
+        g_streamCapture = nullptr;
+        printf("[stream] Recording stopped (exit)\n");
+    }
+#endif
     pc_save_state(&cpuState);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
