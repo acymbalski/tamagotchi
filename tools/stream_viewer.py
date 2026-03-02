@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Timeline viewer for .tamstream files with scrubber, stats, and LCD display."""
+"""Timeline viewer for .tamstream files with scrubber, stats, hex grid, and LCD display."""
 
 import sys
 import os
@@ -7,15 +7,67 @@ import os
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from stream_reader import TamStream, REC_ANNOTATION, REC_BUTTON_EVENT, REC_TICK_MARKER
+from stream_reader import (
+    TamStream, CachedStateTracker,
+    REC_ANNOTATION, REC_BUTTON_EVENT, REC_TICK_MARKER,
+)
+from annotation_store import AnnotationStore
+import memory_config
 
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                             QLabel, QSlider, QPushButton, QScrollArea, QFrame, QMessageBox)
-from PyQt6.QtGui import QImage, QPixmap, QPainter, QColor, QPen
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QSlider, QPushButton, QScrollArea, QFrame, QMessageBox,
+    QLineEdit, QSplitter, QToolTip, QMenu,
+)
+from PyQt6.QtGui import QImage, QPixmap, QPainter, QColor, QPen, QFont, QFontMetrics, QKeyEvent
+from PyQt6.QtCore import Qt, QTimer, QPoint, QRect
 
 TICK_FREQUENCY = 32768
 
+# ---------------------------------------------------------------------------
+# Field-to-color mapping from memory_config.MAP
+# ---------------------------------------------------------------------------
+
+FIELD_COLORS = {
+    "hunger":        QColor(255, 80, 80),
+    "happy":         QColor(80, 200, 80),
+    "discipline":    QColor(230, 200, 50),
+    "weight":        QColor(180, 100, 220),
+    "age":           QColor(220, 220, 220),
+    "sick":          QColor(255, 150, 50),
+    "sick_flag2":    QColor(255, 130, 30),
+    "sick_level":    QColor(255, 160, 70),
+    "sick_severity": QColor(255, 110, 20),
+    "sleeping":      QColor(100, 150, 255),
+    "poop":          QColor(80, 220, 220),
+    "attention":     QColor(100, 180, 255),
+    "lifecycle":     QColor(255, 255, 100),
+    "character":     QColor(255, 150, 200),
+}
+
+def _build_addr_color_map():
+    """Build {nibble_addr: (field_name, QColor)} from memory_config.MAP."""
+    result = {}
+    for name, cfg in memory_config.MAP.items():
+        addr = cfg.get("addr")
+        if addr is None:
+            continue
+        color = FIELD_COLORS.get(name, QColor(120, 120, 120))
+        result[addr] = (name, color)
+        # BCD fields span two nibbles
+        if cfg.get("type") == "bcd":
+            result[addr + 1] = (name, color)
+    return result
+
+ADDR_COLOR_MAP = _build_addr_color_map()
+
+# Danger zone (CPU call stack area)
+DANGER_RANGE = range(0x060, 0x080)
+
+
+# ===========================================================================
+# LcdWidget
+# ===========================================================================
 
 class LcdWidget(QWidget):
     """Renders LCD frame data as a pixel grid."""
@@ -39,8 +91,6 @@ class LcdWidget(QWidget):
             painter.end()
             return
 
-        # Render 32x16 pixel grid from frame data
-        # Frame data layout: 50 bytes, representing two 0x28-nibble display segments
         pixel_w = self.width() // 32
         pixel_h = self.height() // 16
 
@@ -58,16 +108,191 @@ class LcdWidget(QWidget):
         painter.end()
 
 
-class TimelineWidget(QWidget):
-    """Custom widget showing annotation and button event markers on a timeline."""
+# ===========================================================================
+# MemoryGridWidget (TICKET-23 + TICKET-25)
+# ===========================================================================
+
+class MemoryGridWidget(QWidget):
+    """Hex grid displaying raw nibble values with field color-coding and diff highlighting."""
+
+    DEFAULT_START = 0x020
+    DEFAULT_ROWS = 8    # 8 rows of 0x10 nibbles = 0x020..0x09F
+    MAX_ROWS = 40       # 640 nibbles / 16 per row
+    COLS = 16
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(30)
+        self._ram = bytes(320)
+        self._diff = {}
+        self._start_addr = self.DEFAULT_START
+        self._num_rows = self.DEFAULT_ROWS
+        self._font = QFont("Consolas", 9)
+        self._font.setStyleHint(QFont.StyleHint.Monospace)
+        self._cell_w = 18
+        self._cell_h = 16
+        self._addr_w = 50
+        self._update_size()
+
+    def _update_size(self):
+        # Header row + data rows + legend row + diff summary
+        total_h = self._cell_h * (self._num_rows + 1) + 40 + 20
+        total_w = self._addr_w + self.COLS * self._cell_w + 10
+        self.setMinimumSize(total_w, total_h)
+        self.setMaximumWidth(total_w + 50)
+
+    def set_state(self, ram, diff=None):
+        self._ram = ram
+        self._diff = diff or {}
+        self.update()
+
+    def set_visible_rows(self, n):
+        self._num_rows = max(1, min(n, self.MAX_ROWS))
+        self._update_size()
+        self.update()
+
+    def expand_one(self):
+        self.set_visible_rows(self._num_rows + 1)
+
+    def collapse_one(self):
+        self.set_visible_rows(self._num_rows - 1)
+
+    def show_all(self):
+        self._start_addr = 0x000
+        self.set_visible_rows(self.MAX_ROWS)
+
+    def show_default(self):
+        self._start_addr = self.DEFAULT_START
+        self.set_visible_rows(self.DEFAULT_ROWS)
+
+    @property
+    def visible_rows(self):
+        return self._num_rows
+
+    def _read_nibble(self, addr):
+        byte_idx = addr >> 1
+        if byte_idx >= len(self._ram):
+            return 0
+        val = self._ram[byte_idx] if isinstance(self._ram, (bytes, bytearray)) else self._ram[byte_idx]
+        return ((val & 0xF0) >> 4) if (addr & 1) == 0 else (val & 0x0F)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setFont(self._font)
+        fm = QFontMetrics(self._font)
+        bg_color = QColor(30, 30, 30)
+        painter.fillRect(self.rect(), bg_color)
+
+        # Header row
+        painter.setPen(QColor(150, 150, 150))
+        for col in range(self.COLS):
+            x = self._addr_w + col * self._cell_w
+            painter.drawText(x, 0, self._cell_w, self._cell_h,
+                             Qt.AlignmentFlag.AlignCenter, f"{col:X}")
+
+        # Data rows
+        for row in range(self._num_rows):
+            row_addr = self._start_addr + row * self.COLS
+            y = (row + 1) * self._cell_h
+
+            # Row address label
+            painter.setPen(QColor(150, 150, 150))
+            painter.drawText(0, y, self._addr_w - 4, self._cell_h,
+                             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                             f"0x{row_addr:03X}:")
+
+            for col in range(self.COLS):
+                addr = row_addr + col
+                if addr >= 640:
+                    continue
+                nibble_val = self._read_nibble(addr)
+                x = self._addr_w + col * self._cell_w
+
+                # Determine background color
+                if addr in self._diff:
+                    # Diff highlight: bright gold
+                    cell_bg = QColor(255, 215, 0)
+                    text_color = QColor(0, 0, 0)
+                elif addr in ADDR_COLOR_MAP:
+                    _, field_color = ADDR_COLOR_MAP[addr]
+                    cell_bg = QColor(field_color.red() // 3, field_color.green() // 3, field_color.blue() // 3)
+                    text_color = field_color
+                else:
+                    cell_bg = bg_color
+                    text_color = QColor(180, 180, 180)
+
+                # Draw cell background
+                painter.fillRect(x, y, self._cell_w - 1, self._cell_h - 1, cell_bg)
+
+                # Danger zone border
+                if addr in DANGER_RANGE:
+                    painter.setPen(QPen(QColor(180, 40, 40), 1))
+                    painter.drawRect(x, y, self._cell_w - 2, self._cell_h - 2)
+
+                # Draw nibble value
+                painter.setPen(text_color)
+                painter.drawText(x, y, self._cell_w, self._cell_h,
+                                 Qt.AlignmentFlag.AlignCenter, f"{nibble_val:X}")
+
+        # Diff summary line
+        y_diff = (self._num_rows + 1) * self._cell_h + 2
+        if self._diff:
+            parts = []
+            for addr in sorted(self._diff.keys())[:8]:
+                old_v, new_v = self._diff[addr]
+                field_info = ADDR_COLOR_MAP.get(addr)
+                if field_info:
+                    parts.append(f"0x{addr:03X}/{field_info[0]} ({old_v:X}\u2192{new_v:X})")
+                else:
+                    parts.append(f"0x{addr:03X} ({old_v:X}\u2192{new_v:X})")
+            summary = f"{len(self._diff)} nibbles changed: {', '.join(parts)}"
+            if len(self._diff) > 8:
+                summary += f" ... and {len(self._diff) - 8} more"
+            painter.setPen(QColor(255, 215, 0))
+            painter.drawText(4, y_diff, self.width() - 8, self._cell_h,
+                             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                             summary)
+        y_diff += self._cell_h + 2
+
+        # Legend
+        y_legend = y_diff
+        lx = 4
+        for name, color in FIELD_COLORS.items():
+            if name not in [n for n, cfg in memory_config.MAP.items() if cfg.get("addr") is not None]:
+                continue
+            # Color square
+            painter.fillRect(lx, y_legend + 2, 10, 10, color)
+            lx += 12
+            # Name
+            painter.setPen(QColor(200, 200, 200))
+            tw = fm.horizontalAdvance(name) + 8
+            painter.drawText(lx, y_legend, tw, self._cell_h,
+                             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, name)
+            lx += tw
+            if lx > self.width() - 60:
+                lx = 4
+                y_legend += self._cell_h
+
+        painter.end()
+
+
+# ===========================================================================
+# TimelineWidget (TICKET-27 enhanced)
+# ===========================================================================
+
+class TimelineWidget(QWidget):
+    """Timeline with markers, hover info, and click-to-jump."""
+
+    tick_clicked = None  # Will be set as callback
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(40)
+        self.setMouseTracking(True)
         self.min_tick = 0
         self.max_tick = 1
-        self.markers = []  # (tick, color, label)
+        self.markers = []  # (tick, color, label, style)
         self.current_tick = 0
+        self._on_tick_clicked = None
 
     def set_range(self, min_tick, max_tick):
         self.min_tick = min_tick
@@ -82,22 +307,78 @@ class TimelineWidget(QWidget):
         self.current_tick = tick
         self.update()
 
+    def set_click_callback(self, callback):
+        self._on_tick_clicked = callback
+
+    def tick_from_x(self, x):
+        span = self.max_tick - self.min_tick
+        if span <= 0 or self.width() <= 0:
+            return self.min_tick
+        return int(self.min_tick + (x / self.width()) * span)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._on_tick_clicked:
+            tick = self.tick_from_x(event.position().x())
+            self._on_tick_clicked(tick)
+        elif event.button() == Qt.MouseButton.RightButton:
+            # Context menu
+            menu = QMenu(self)
+            tick = self.tick_from_x(event.position().x())
+            act = menu.addAction(f"Jump to tick {tick:,}")
+            act.triggered.connect(lambda: self._on_tick_clicked(tick) if self._on_tick_clicked else None)
+            menu.exec(event.globalPosition().toPoint())
+
+    def mouseMoveEvent(self, event):
+        tick = self.tick_from_x(event.position().x())
+        emu_time = (tick - self.min_tick) / TICK_FREQUENCY
+        QToolTip.showText(
+            event.globalPosition().toPoint(),
+            f"Tick: {tick:,}\nTime: {emu_time:.2f}s",
+            self,
+        )
+
     def paintEvent(self, event):
         painter = QPainter(self)
         w = self.width()
         h = self.height()
-
-        # Background
         painter.fillRect(0, 0, w, h, QColor(40, 40, 40))
 
-        # Markers
         span = self.max_tick - self.min_tick
-        for tick, color, label in self.markers:
-            x = int((tick - self.min_tick) / span * w)
-            painter.setPen(QPen(color, 2))
-            painter.drawLine(x, 0, x, h)
+        if span <= 0:
+            painter.end()
+            return
 
-        # Current position
+        # Draw markers with style differentiation
+        for marker in self.markers:
+            tick = marker[0]
+            color = marker[1]
+            label = marker[2] if len(marker) > 2 else ""
+            style = marker[3] if len(marker) > 3 else "line"
+            x = int((tick - self.min_tick) / span * w)
+
+            if style == "triangle_up":
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(color)
+                painter.drawPolygon([
+                    QPoint(x - 3, h),
+                    QPoint(x + 3, h),
+                    QPoint(x, h - 8),
+                ])
+            elif style == "triangle_down":
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(color)
+                painter.drawPolygon([
+                    QPoint(x - 3, 0),
+                    QPoint(x + 3, 0),
+                    QPoint(x, 8),
+                ])
+            else:
+                # Default: line
+                height = h if style == "tall_line" else h // 2
+                painter.setPen(QPen(color, 1 if style != "tall_line" else 2))
+                painter.drawLine(x, h - height, x, h)
+
+        # Current position indicator
         cx = int((self.current_tick - self.min_tick) / span * w)
         painter.setPen(QPen(QColor(255, 255, 0), 2))
         painter.drawLine(cx, 0, cx, h)
@@ -105,94 +386,312 @@ class TimelineWidget(QWidget):
         painter.end()
 
 
+# ===========================================================================
+# HelpOverlay (TICKET-28)
+# ===========================================================================
+
+class HelpOverlay(QWidget):
+    """Semi-transparent overlay showing keyboard shortcuts."""
+
+    HELP_TEXT = """\
+         Keyboard Shortcuts
+
+  Navigation
+    Left / Right         Step +/-1 write
+    Shift+Left / Right   Step +/-10 writes
+    Ctrl+Left / Right    Step +/-1 emu-second
+    Home / End           Jump to start / end
+    Space                Play / Pause auto-step
+
+  Tools
+    A                    Annotate current tick
+    L                    Launch sim here
+    ? / F1               Toggle this help
+
+  Memory Grid
+    M                    Toggle expand / collapse
+    + / =                Show one more row
+    - / _                Show one fewer row
+
+              Press ? to close"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setVisible(False)
+
+    def toggle(self):
+        self.setVisible(not self.isVisible())
+        if self.isVisible():
+            self.raise_()
+            self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        # Semi-transparent background
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 200))
+
+        # Draw text box centered
+        font = QFont("Consolas", 11)
+        font.setStyleHint(QFont.StyleHint.Monospace)
+        painter.setFont(font)
+        painter.setPen(QColor(220, 220, 220))
+
+        fm = QFontMetrics(font)
+        lines = self.HELP_TEXT.split("\n")
+        line_h = fm.height() + 2
+        total_h = len(lines) * line_h
+        max_w = max(fm.horizontalAdvance(line) for line in lines) + 40
+
+        box_x = (self.width() - max_w) // 2
+        box_y = (self.height() - total_h) // 2
+
+        # Box border
+        painter.setPen(QPen(QColor(100, 180, 255), 2))
+        painter.drawRect(box_x - 10, box_y - 15, max_w + 20, total_h + 30)
+
+        painter.setPen(QColor(220, 220, 220))
+        for i, line in enumerate(lines):
+            painter.drawText(box_x, box_y + i * line_h, max_w, line_h,
+                             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, line)
+
+        painter.end()
+
+    def resizeEvent(self, event):
+        self.update()
+
+
+# ===========================================================================
+# NavigationBar (TICKET-24)
+# ===========================================================================
+
+class NavigationBar(QWidget):
+    """Navigation controls with buttons, slider, and status line."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Button row
+        btn_row = QHBoxLayout()
+        self.btn_home = QPushButton("|<")
+        self.btn_back_1s = QPushButton("<<")
+        self.btn_back_10 = QPushButton("<10")
+        self.btn_back_1 = QPushButton("<")
+        self.slider = QSlider(Qt.Orientation.Horizontal)
+        self.btn_fwd_1 = QPushButton(">")
+        self.btn_fwd_10 = QPushButton("10>")
+        self.btn_fwd_1s = QPushButton(">>")
+        self.btn_end = QPushButton(">|")
+        self.btn_play = QPushButton("Play")
+
+        for btn in [self.btn_home, self.btn_back_1s, self.btn_back_10, self.btn_back_1]:
+            btn.setFixedWidth(36)
+            btn_row.addWidget(btn)
+        btn_row.addWidget(self.slider, stretch=1)
+        for btn in [self.btn_fwd_1, self.btn_fwd_10, self.btn_fwd_1s, self.btn_end]:
+            btn.setFixedWidth(36)
+            btn_row.addWidget(btn)
+        self.btn_play.setFixedWidth(50)
+        btn_row.addWidget(self.btn_play)
+        layout.addLayout(btn_row)
+
+        # Status line
+        self.status_label = QLabel("Tick: 0 | Time: 0.0s | Step: 0 of 0")
+        self.status_label.setStyleSheet("color: #aaa; font-size: 11px;")
+        layout.addWidget(self.status_label)
+
+    def update_status(self, tick, min_tick, cursor, total, diff_count):
+        emu_time = (tick - min_tick) / TICK_FREQUENCY
+        self.status_label.setText(
+            f"Tick: {tick:,} | Time: {emu_time:.1f}s | "
+            f"Step: write #{cursor:,} of {total:,} | "
+            f"Writes at tick: {diff_count}"
+        )
+
+
+# ===========================================================================
+# StreamViewer (main window)
+# ===========================================================================
+
 class StreamViewer(QMainWindow):
     def __init__(self, filepath):
         super().__init__()
         self.setWindowTitle(f"Stream Viewer - {os.path.basename(filepath)}")
-        self.resize(800, 600)
+        self.resize(1100, 750)
 
         self.stream = TamStream(filepath)
+        self.tracker = CachedStateTracker(self.stream)
+        self.annotation_store = AnnotationStore(filepath)
+
         self.min_tick, self.max_tick = self.stream.tick_range
         if self.min_tick is None:
             self.min_tick = 0
             self.max_tick = 0
         self.current_tick = self.min_tick
 
-        # Pre-load annotation and button markers
+        # Auto-play timer
+        self._playing = False
+        self._play_timer = QTimer()
+        self._play_timer.setInterval(100)
+        self._play_timer.timeout.connect(self._auto_step)
+
+        # Pre-load markers
         self.annotation_markers = []
         self.button_markers = []
         self._load_markers()
 
         self._init_ui()
+
+        # Initial seek
+        self.tracker.seek(self.min_tick)
         self._update_display()
 
     def _load_markers(self):
         for rec_type, tick, data in self.stream.records():
             if rec_type == REC_ANNOTATION:
-                self.annotation_markers.append((tick, QColor(255, 100, 100), data.get("text", "")))
+                self.annotation_markers.append(
+                    (tick, QColor(255, 100, 100), data.get("text", ""), "tall_line"))
             elif rec_type == REC_BUTTON_EVENT:
-                self.button_markers.append((tick, QColor(100, 200, 100), "btn"))
+                state = data.get("state", 0)
+                style = "triangle_up" if state == 1 else "triangle_down"
+                self.button_markers.append(
+                    (tick, QColor(100, 200, 100), "btn", style))
+
+    def _get_all_markers(self):
+        """Combine in-stream markers + sidecar annotation markers."""
+        markers = list(self.annotation_markers) + list(self.button_markers)
+        for ann in self.annotation_store.all():
+            markers.append((ann["tick"], QColor(100, 150, 255), ann["text"], "tall_line"))
+        return markers
 
     def _init_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
-        main_layout = QHBoxLayout(central)
+        main_layout = QVBoxLayout(central)
 
-        # Left panel: stats
-        left = QVBoxLayout()
-        self.stats_frame = QFrame()
-        self.stats_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        self.stats_layout = QVBoxLayout(self.stats_frame)
+        # Top area: splitter with stats | LCD+hex grid
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # --- Left panel: stats + annotations ---
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(4, 4, 4, 4)
 
         self.tick_label = QLabel("Tick: 0")
         self.tick_label.setStyleSheet("font-weight: bold;")
-        self.stats_layout.addWidget(self.tick_label)
+        left_layout.addWidget(self.tick_label)
 
         self.time_label = QLabel("Time: 0.0s")
-        self.stats_layout.addWidget(self.time_label)
+        left_layout.addWidget(self.time_label)
 
         self.stats_labels = {}
         stat_names = ["hunger", "happy", "discipline", "weight", "age", "sick",
                       "sleeping", "poop", "attention", "lifecycle", "character"]
         for name in stat_names:
             lbl = QLabel(f"{name}: --")
-            self.stats_layout.addWidget(lbl)
+            left_layout.addWidget(lbl)
             self.stats_labels[name] = lbl
 
-        self.stats_layout.addStretch()
+        left_layout.addWidget(QLabel(""))  # spacer
+
+        # Annotation list label
+        self.annotation_list_label = QLabel("Nearby annotations:")
+        self.annotation_list_label.setStyleSheet("font-weight: bold; font-size: 11px;")
+        left_layout.addWidget(self.annotation_list_label)
+        self.annotation_list = QLabel("")
+        self.annotation_list.setWordWrap(True)
+        self.annotation_list.setStyleSheet("font-size: 10px; color: #aac;")
+        left_layout.addWidget(self.annotation_list)
+
+        left_layout.addStretch()
 
         # Launch sim button
-        self.launch_btn = QPushButton("Launch Sim Here")
+        self.launch_btn = QPushButton("Launch Sim Here (L)")
         self.launch_btn.clicked.connect(self._launch_sim)
-        self.stats_layout.addWidget(self.launch_btn)
+        left_layout.addWidget(self.launch_btn)
 
         scroll = QScrollArea()
-        scroll.setWidget(self.stats_frame)
+        scroll.setWidget(left_widget)
         scroll.setWidgetResizable(True)
-        scroll.setFixedWidth(200)
-        left.addWidget(scroll)
+        scroll.setMinimumWidth(180)
+        scroll.setMaximumWidth(220)
+        splitter.addWidget(scroll)
 
-        main_layout.addLayout(left)
-
-        # Center: LCD + timeline
-        center = QVBoxLayout()
+        # --- Center panel: LCD + hex grid ---
+        center_widget = QWidget()
+        center_layout = QVBoxLayout(center_widget)
+        center_layout.setContentsMargins(4, 4, 4, 4)
 
         self.lcd_widget = LcdWidget()
-        center.addWidget(self.lcd_widget, alignment=Qt.AlignmentFlag.AlignCenter)
+        center_layout.addWidget(self.lcd_widget, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        center.addStretch()
+        # Hex grid with expand/collapse buttons
+        hex_header = QHBoxLayout()
+        hex_header.addWidget(QLabel("Memory Hex Grid"))
+        hex_header.addStretch()
+        self.btn_show_more = QPushButton("Show more")
+        self.btn_show_more.clicked.connect(self._hex_expand)
+        hex_header.addWidget(self.btn_show_more)
+        self.btn_show_all = QPushButton("Show all")
+        self.btn_show_all.clicked.connect(self._hex_show_all)
+        hex_header.addWidget(self.btn_show_all)
+        self.btn_show_default = QPushButton("Show default")
+        self.btn_show_default.clicked.connect(self._hex_show_default)
+        hex_header.addWidget(self.btn_show_default)
+        center_layout.addLayout(hex_header)
 
-        # Timeline markers
+        self.hex_grid = MemoryGridWidget()
+        hex_scroll = QScrollArea()
+        hex_scroll.setWidget(self.hex_grid)
+        hex_scroll.setWidgetResizable(False)
+        center_layout.addWidget(hex_scroll, stretch=1)
+
+        splitter.addWidget(center_widget)
+        splitter.setStretchFactor(1, 1)
+        main_layout.addWidget(splitter, stretch=1)
+
+        # --- Annotation input ---
+        ann_row = QHBoxLayout()
+        ann_row.addWidget(QLabel("Annotate:"))
+        self.annotation_input = QLineEdit()
+        self.annotation_input.setPlaceholderText("Type annotation for current tick... (A)")
+        self.annotation_input.returnPressed.connect(self._save_annotation)
+        ann_row.addWidget(self.annotation_input, stretch=1)
+        main_layout.addLayout(ann_row)
+
+        # --- Timeline ---
         self.timeline_widget = TimelineWidget()
-        all_markers = self.annotation_markers + self.button_markers
         self.timeline_widget.set_range(self.min_tick, self.max_tick)
-        self.timeline_widget.set_markers(all_markers)
-        center.addWidget(self.timeline_widget)
+        self.timeline_widget.set_markers(self._get_all_markers())
+        self.timeline_widget.set_click_callback(self._on_timeline_click)
+        main_layout.addWidget(self.timeline_widget)
 
-        # Slider
-        self.slider = QSlider(Qt.Orientation.Horizontal)
-        self.slider.setMinimum(0)
-        # Use tick markers as snap points for coarse granularity
+        # --- Navigation bar ---
+        self.nav_bar = NavigationBar()
+        self._setup_tick_positions()
+        self.nav_bar.slider.setMinimum(0)
+        self.nav_bar.slider.setMaximum(max(len(self._tick_positions) - 1, 0))
+        self.nav_bar.slider.valueChanged.connect(self._on_slider_changed)
+
+        self.nav_bar.btn_home.clicked.connect(self._nav_home)
+        self.nav_bar.btn_end.clicked.connect(self._nav_end)
+        self.nav_bar.btn_back_1.clicked.connect(lambda: self._nav_step(-1))
+        self.nav_bar.btn_fwd_1.clicked.connect(lambda: self._nav_step(1))
+        self.nav_bar.btn_back_10.clicked.connect(lambda: self._nav_step(-10))
+        self.nav_bar.btn_fwd_10.clicked.connect(lambda: self._nav_step(10))
+        self.nav_bar.btn_back_1s.clicked.connect(lambda: self._nav_step_time(-1))
+        self.nav_bar.btn_fwd_1s.clicked.connect(lambda: self._nav_step_time(1))
+        self.nav_bar.btn_play.clicked.connect(self._toggle_play)
+
+        main_layout.addWidget(self.nav_bar)
+
+        # --- Help overlay ---
+        self.help_overlay = HelpOverlay(central)
+        self.help_overlay.setGeometry(central.rect())
+
+    def _setup_tick_positions(self):
+        """Build coarse tick positions from tick markers for slider."""
         self._tick_positions = [self.min_tick]
         for rec_type, tick, data in self.stream.records():
             if rec_type == REC_TICK_MARKER:
@@ -201,16 +700,110 @@ class StreamViewer(QMainWindow):
             self._tick_positions.append(self.max_tick)
         self._tick_positions.sort()
 
-        self.slider.setMaximum(max(len(self._tick_positions) - 1, 0))
-        self.slider.valueChanged.connect(self._on_slider_changed)
-        center.addWidget(self.slider)
+    # --- Navigation methods ---
 
-        main_layout.addLayout(center, stretch=1)
+    def _nav_step(self, n):
+        self._stop_play()
+        if n > 0:
+            self.tracker.step_forward(n)
+        elif n < 0:
+            self.tracker.step_backward(-n)
+        self.current_tick = self.tracker.current_tick
+        self._update_display()
+
+    def _nav_step_time(self, seconds):
+        self._stop_play()
+        target = self.current_tick + int(seconds * TICK_FREQUENCY)
+        target = max(self.min_tick, min(target, self.max_tick))
+        self.tracker.step_to_tick(target)
+        self.current_tick = self.tracker.current_tick
+        self._update_display()
+
+    def _nav_home(self):
+        self._stop_play()
+        self.tracker.seek(self.min_tick)
+        self.current_tick = self.min_tick
+        self._update_display()
+
+    def _nav_end(self):
+        self._stop_play()
+        self.tracker.seek(self.max_tick)
+        self.current_tick = self.max_tick
+        self._update_display()
 
     def _on_slider_changed(self, index):
         if 0 <= index < len(self._tick_positions):
-            self.current_tick = self._tick_positions[index]
+            tick = self._tick_positions[index]
+            self._stop_play()
+            self.tracker.seek(tick)
+            self.current_tick = tick
             self._update_display()
+
+    def _on_timeline_click(self, tick):
+        self._stop_play()
+        tick = max(self.min_tick, min(tick, self.max_tick))
+        self.tracker.seek(tick)
+        self.current_tick = tick
+        self._update_display()
+
+    def _toggle_play(self):
+        if self._playing:
+            self._stop_play()
+        else:
+            self._playing = True
+            self.nav_bar.btn_play.setText("Pause")
+            self._play_timer.start()
+
+    def _stop_play(self):
+        self._playing = False
+        self._play_timer.stop()
+        self.nav_bar.btn_play.setText("Play")
+
+    def _auto_step(self):
+        n = self.tracker.step_forward(1)
+        if n == 0:
+            self._stop_play()
+            return
+        self.current_tick = self.tracker.current_tick
+        self._update_display()
+
+    # --- Hex grid controls ---
+
+    def _hex_expand(self):
+        self.hex_grid.expand_one()
+
+    def _hex_show_all(self):
+        self.hex_grid.show_all()
+
+    def _hex_show_default(self):
+        self.hex_grid.show_default()
+
+    # --- Annotation ---
+
+    def _save_annotation(self):
+        text = self.annotation_input.text().strip()
+        if text:
+            self.annotation_store.add(self.current_tick, text)
+            self.annotation_input.clear()
+            self.annotation_input.clearFocus()
+            # Refresh timeline markers and annotation list
+            self.timeline_widget.set_markers(self._get_all_markers())
+            self._update_annotation_list()
+
+    def _update_annotation_list(self):
+        """Show annotations near the current tick."""
+        window = TICK_FREQUENCY * 10  # 10 seconds window
+        nearby = self.annotation_store.get_in_range(
+            self.current_tick - window, self.current_tick + window)
+        # Also include in-stream annotations
+        lines = []
+        for ann in nearby[:10]:
+            offset = ann["tick"] - self.current_tick
+            prefix = f"[+{offset:,}]" if offset >= 0 else f"[{offset:,}]"
+            lines.append(f"{prefix} {ann['text']}")
+        self.annotation_list.setText("\n".join(lines) if lines else "(none)")
+
+    # --- Display update ---
 
     def _update_display(self):
         self.tick_label.setText(f"Tick: {self.current_tick:,}")
@@ -219,15 +812,32 @@ class StreamViewer(QMainWindow):
 
         self.timeline_widget.set_current_tick(self.current_tick)
 
-        # Update stats
+        # Sync slider position (find nearest tick position)
+        import bisect
+        idx = bisect.bisect_left(self._tick_positions, self.current_tick)
+        if idx >= len(self._tick_positions):
+            idx = len(self._tick_positions) - 1
+        self.nav_bar.slider.blockSignals(True)
+        self.nav_bar.slider.setValue(idx)
+        self.nav_bar.slider.blockSignals(False)
+
+        # Update stats from tracker RAM
+        ram = self.tracker.ram
         try:
-            stats = self.stream.stats_at_tick(self.current_tick)
+            result = {}
+            for name in memory_config.MAP:
+                val = memory_config.get_value(ram, name)
+                if val is not None:
+                    result[name] = val
             for name, lbl in self.stats_labels.items():
-                val = stats.get(name, "--")
+                val = result.get(name, "--")
                 lbl.setText(f"{name}: {val}")
         except Exception as e:
             for lbl in self.stats_labels.values():
                 lbl.setText(f"Error: {e}")
+
+        # Update hex grid with diff
+        self.hex_grid.set_state(ram, self.tracker.last_diff)
 
         # Update LCD
         frame = self.stream.nearest_lcd_frame(self.current_tick)
@@ -236,10 +846,95 @@ class StreamViewer(QMainWindow):
         else:
             self.lcd_widget.set_frame(None)
 
+        # Update navigation status
+        self.nav_bar.update_status(
+            self.current_tick, self.min_tick,
+            self.tracker.write_cursor, self.tracker.total_writes,
+            len(self.tracker.last_diff),
+        )
+
+        # Update annotation list
+        self._update_annotation_list()
+
     def _launch_sim(self):
         QMessageBox.information(self, "Not Yet Implemented",
                                 "Launch Sim Here requires savestate binary layout knowledge.\n"
                                 "This feature will be implemented in a future ticket.")
+
+    # --- Keyboard handling ---
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        mods = event.modifiers()
+
+        # Help overlay: ? or F1
+        if key == Qt.Key.Key_Question or key == Qt.Key.Key_F1:
+            self.help_overlay.toggle()
+            return
+
+        # If help overlay is visible, Escape closes it
+        if self.help_overlay.isVisible():
+            if key == Qt.Key.Key_Escape:
+                self.help_overlay.setVisible(False)
+            return
+
+        # If annotation input has focus, let it handle keys normally
+        if self.annotation_input.hasFocus():
+            if key == Qt.Key.Key_Escape:
+                self.annotation_input.clear()
+                self.annotation_input.clearFocus()
+                return
+            super().keyPressEvent(event)
+            return
+
+        # Navigation
+        if key == Qt.Key.Key_Left:
+            if mods & Qt.KeyboardModifier.ControlModifier:
+                self._nav_step_time(-1)
+            elif mods & Qt.KeyboardModifier.ShiftModifier:
+                self._nav_step(-10)
+            else:
+                self._nav_step(-1)
+        elif key == Qt.Key.Key_Right:
+            if mods & Qt.KeyboardModifier.ControlModifier:
+                self._nav_step_time(1)
+            elif mods & Qt.KeyboardModifier.ShiftModifier:
+                self._nav_step(10)
+            else:
+                self._nav_step(1)
+        elif key == Qt.Key.Key_Home:
+            self._nav_home()
+        elif key == Qt.Key.Key_End:
+            self._nav_end()
+        elif key == Qt.Key.Key_Space:
+            self._toggle_play()
+
+        # Annotation focus
+        elif key == Qt.Key.Key_A:
+            self.annotation_input.setFocus()
+
+        # Launch sim
+        elif key == Qt.Key.Key_L:
+            self._launch_sim()
+
+        # Memory grid expand/collapse
+        elif key == Qt.Key.Key_M:
+            if self.hex_grid.visible_rows == MemoryGridWidget.DEFAULT_ROWS:
+                self.hex_grid.show_all()
+            else:
+                self.hex_grid.show_default()
+        elif key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
+            self.hex_grid.expand_one()
+        elif key in (Qt.Key.Key_Minus, Qt.Key.Key_Underscore):
+            self.hex_grid.collapse_one()
+
+        else:
+            super().keyPressEvent(event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, 'help_overlay'):
+            self.help_overlay.setGeometry(self.centralWidget().rect())
 
 
 def main():

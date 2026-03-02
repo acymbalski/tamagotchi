@@ -310,3 +310,213 @@ class TamStream:
 
     def __exit__(self, *args):
         self.close()
+
+
+class CachedStateTracker:
+    """Maintains RAM state with efficient forward/backward stepping.
+
+    Builds an index of all write events with old values for reversibility.
+    Supports seek, step_forward, step_backward, and step_to_tick.
+
+    Usage:
+        tracker = CachedStateTracker(tam_stream)
+        tracker.seek(tick)          # Jump to any tick (uses snapshots)
+        tracker.step_forward(n)     # Step forward n write-events
+        tracker.step_backward(n)    # Step backward n write-events (reverts)
+        tracker.step_to_tick(tick)  # Step to exact tick (forward or backward)
+        state = tracker.ram         # Current 320-byte RAM state
+        diff = tracker.last_diff    # Dict of {addr: (old_val, new_val)}
+    """
+
+    def __init__(self, tam_stream):
+        self._stream = tam_stream
+        self._ram = bytearray(RAM_BYTES)
+        self._write_cursor = 0   # index into _writes
+        self._current_tick = 0
+        self._last_diff = {}
+        self._writes = []         # [(tick, addr, new_val, old_val, source, func_id), ...]
+        self._build_write_index()
+
+    def _build_write_index(self):
+        """Scan all records and build indexed write list with old_values."""
+        # Start from first snapshot to get a baseline
+        if not self._stream._snapshot_positions:
+            return
+
+        snap_tick, snap_pos = self._stream._snapshot_positions[0]
+        f = self._stream._file
+        f.seek(snap_pos + 1 + 4)  # skip tag + tick
+        running_ram = bytearray(f.read(RAM_BYTES))
+
+        writes = []
+        for rec_type, tick, data in self._stream.records():
+            if rec_type in (REC_ROM_WRITE, REC_BABYSITTER_WRITE):
+                addr = data["addr"]
+                new_val = data["value"]
+                if addr < 640:
+                    byte_idx = addr >> 1
+                    if byte_idx < RAM_BYTES:
+                        # Get old value
+                        if (addr & 1) == 0:
+                            old_val = (running_ram[byte_idx] & 0xF0) >> 4
+                        else:
+                            old_val = running_ram[byte_idx] & 0x0F
+                        # Apply new value to running state
+                        if (addr & 1) == 0:
+                            running_ram[byte_idx] = (running_ram[byte_idx] & 0x0F) | (new_val << 4)
+                        else:
+                            running_ram[byte_idx] = (running_ram[byte_idx] & 0xF0) | (new_val & 0x0F)
+
+                        source = 0 if rec_type == REC_ROM_WRITE else 1
+                        func_id = data.get("func_id", 0)
+                        writes.append((tick, addr, new_val, old_val, source, func_id))
+
+            elif rec_type == REC_RAM_SNAPSHOT:
+                # Reset running_ram to this snapshot
+                mem = data["memory"]
+                running_ram = bytearray(mem)
+
+        self._writes = writes
+
+    @property
+    def current_tick(self):
+        return self._current_tick
+
+    @property
+    def ram(self):
+        return bytes(self._ram)
+
+    @property
+    def last_diff(self):
+        return dict(self._last_diff)
+
+    @property
+    def write_cursor(self):
+        return self._write_cursor
+
+    @property
+    def total_writes(self):
+        return len(self._writes)
+
+    def _apply_nibble(self, addr, value):
+        """Apply a nibble value to the RAM."""
+        byte_idx = addr >> 1
+        if byte_idx < RAM_BYTES:
+            if (addr & 1) == 0:
+                self._ram[byte_idx] = (self._ram[byte_idx] & 0x0F) | (value << 4)
+            else:
+                self._ram[byte_idx] = (self._ram[byte_idx] & 0xF0) | (value & 0x0F)
+
+    def _read_nibble(self, addr):
+        """Read a nibble value from the RAM."""
+        byte_idx = addr >> 1
+        if byte_idx < RAM_BYTES:
+            if (addr & 1) == 0:
+                return (self._ram[byte_idx] & 0xF0) >> 4
+            else:
+                return self._ram[byte_idx] & 0x0F
+        return 0
+
+    def seek(self, tick):
+        """Jump to any tick. Uses nearest snapshot + replay."""
+        self._last_diff = {}
+
+        # Find the nearest prior snapshot
+        best_snap = None
+        for snap_tick, snap_pos in self._stream._snapshot_positions:
+            if snap_tick <= tick:
+                best_snap = (snap_tick, snap_pos)
+            else:
+                break
+
+        if best_snap is None:
+            if self._stream._snapshot_positions:
+                best_snap = self._stream._snapshot_positions[0]
+            else:
+                return
+
+        # Load snapshot RAM
+        f = self._stream._file
+        f.seek(best_snap[1] + 1 + 4)
+        self._ram = bytearray(f.read(RAM_BYTES))
+
+        # Find the write cursor position: apply all writes up to tick
+        self._write_cursor = 0
+        for i, (w_tick, addr, new_val, old_val, source, func_id) in enumerate(self._writes):
+            if w_tick > tick:
+                break
+            if w_tick >= best_snap[0]:
+                self._apply_nibble(addr, new_val)
+            self._write_cursor = i + 1
+
+        self._current_tick = tick
+
+    def step_forward(self, n=1):
+        """Step forward n write-events. Returns actual steps taken."""
+        self._last_diff = {}
+        steps = 0
+        while steps < n and self._write_cursor < len(self._writes):
+            tick, addr, new_val, old_val, source, func_id = self._writes[self._write_cursor]
+            cur_val = self._read_nibble(addr)
+            self._apply_nibble(addr, new_val)
+            self._last_diff[addr] = (cur_val, new_val)
+            self._current_tick = tick
+            self._write_cursor += 1
+            steps += 1
+        return steps
+
+    def step_backward(self, n=1):
+        """Step backward n write-events. Returns actual steps taken."""
+        self._last_diff = {}
+        steps = 0
+        while steps < n and self._write_cursor > 0:
+            self._write_cursor -= 1
+            tick, addr, new_val, old_val, source, func_id = self._writes[self._write_cursor]
+            cur_val = self._read_nibble(addr)
+            self._apply_nibble(addr, old_val)
+            self._last_diff[addr] = (cur_val, old_val)
+            # Set current_tick to the previous write's tick, or snapshot tick
+            if self._write_cursor > 0:
+                self._current_tick = self._writes[self._write_cursor - 1][0]
+            else:
+                # Back at the beginning
+                if self._stream._snapshot_positions:
+                    self._current_tick = self._stream._snapshot_positions[0][0]
+                else:
+                    self._current_tick = 0
+            steps += 1
+        return steps
+
+    def step_to_tick(self, tick):
+        """Step to exact tick. Uses incremental stepping if close, seek if far."""
+        if tick == self._current_tick:
+            return
+
+        # Determine if we should step or seek
+        # If target is within 1000 writes of current position, step incrementally
+        if tick > self._current_tick:
+            # Step forward until we pass the target tick
+            self._last_diff = {}
+            while self._write_cursor < len(self._writes):
+                w_tick = self._writes[self._write_cursor][0]
+                if w_tick > tick:
+                    break
+                _, addr, new_val, old_val, source, func_id = self._writes[self._write_cursor]
+                cur_val = self._read_nibble(addr)
+                self._apply_nibble(addr, new_val)
+                self._last_diff[addr] = (cur_val, new_val)
+                self._write_cursor += 1
+            self._current_tick = tick
+        else:
+            # Step backward
+            self._last_diff = {}
+            while self._write_cursor > 0:
+                prev_tick = self._writes[self._write_cursor - 1][0]
+                if prev_tick < tick:
+                    break
+                self._write_cursor -= 1
+                _, addr, new_val, old_val, source, func_id = self._writes[self._write_cursor]
+                cur_val = self._read_nibble(addr)
+                self._apply_nibble(addr, old_val)
+                self._last_diff[addr] = (cur_val, old_val)
+            self._current_tick = tick
