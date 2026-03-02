@@ -27,6 +27,9 @@
 #include "hal.h"
 #include "rom_12bit.h"
 
+#ifdef STREAM_CAPTURE_ENABLED
+extern void stream_log_rom_write(u12_t addr, u4_t value, u32_t tick);
+#endif
 
 #define CPU_SPEED_RATIO      1
 
@@ -686,6 +689,9 @@ static void set_memory(u12_t n, u4_t v)
     } else {
       memory[n>>1] = (memory[n>>1] & 0xF0) | v;
     }
+#ifdef STREAM_CAPTURE_ENABLED
+    stream_log_rom_write(n, v, tick_counter);
+#endif
     //memory[n] = v;
   } else if (n >= MEM_DISPLAY1_ADDR && n < (MEM_DISPLAY1_ADDR + MEM_DISPLAY1_SIZE)) {
     /* Display Memory 1 */

@@ -1,6 +1,9 @@
 #include "memory.h"
 #include <Arduino.h>
 #include "cpu.h"
+#ifdef STREAM_CAPTURE_ENABLED
+#include "stream_capture.h"
+#endif
 
 
 uint8_t readMemory(uint16_t address)
@@ -68,6 +71,14 @@ void setMemory(uint16_t address, uint8_t value)
     Serial.println("(Original memory address: 0x" + String(original_address, HEX) + ")");
     Serial.println("(New address: 0x" + String(address, HEX) + ")");
     cpuState.memory[address] = value;
+#ifdef STREAM_CAPTURE_ENABLED
+    if (g_streamCapture) {
+        uint8_t nibbleValue = (original_address & 1) == 0
+            ? (value >> 4) & 0xF
+            : value & 0xF;
+        g_streamCapture->logBabysitterWrite(cpuState.tick_counter, original_address, nibbleValue, g_currentBabysitterFunc);
+    }
+#endif
     cpu_set_state(&cpuState);
     return;
   }
