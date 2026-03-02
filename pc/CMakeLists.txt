@@ -59,6 +59,7 @@ set(SOURCES
     ${CMAKE_SOURCE_DIR}/../src/tamalib.c
     ${CMAKE_SOURCE_DIR}/../src/memory.cpp
     ${CMAKE_SOURCE_DIR}/../src/babysitter.cpp
+    ${CMAKE_SOURCE_DIR}/../src/stream_capture.cpp
 )
 # src/main.cpp, src/input.cpp, src/networking.cpp, src/savestate.cpp excluded.
 
@@ -87,6 +88,7 @@ target_compile_definitions(tamagotchi_pc PRIVATE
     TAMA_DISPLAY_FRAMERATE=30
     NOMINMAX
     _CRT_SECURE_NO_WARNINGS
+    STREAM_CAPTURE_ENABLED
 )
 
 target_link_libraries(tamagotchi_pc PRIVATE ${SDL2_LIBRARIES})
