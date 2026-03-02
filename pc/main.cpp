@@ -43,6 +43,9 @@
 #define WIN_W         (STATS_W + MARGIN + LCD_DRAW_W + MARGIN)   /* 480 */
 #define WIN_H         320
 
+/* ---- Captures directory (relative to exe in pc/build/) ---- */
+#define CAPTURES_DIR "../../captures"
+
 /* ---- Global state ---- */
 static bool_t matrix_buffer[LCD_HEIGHT][LCD_WIDTH / 8] = {{0}};
 static bool_t icon_buffer[ICON_NUM] = {0};
@@ -292,10 +295,10 @@ static void take_snapshot() {
     uint64_t ts = GetTickCount64();
     
     // Ensure captures directory exists
-    CreateDirectoryA("captures", NULL);
+    CreateDirectoryA(CAPTURES_DIR, NULL);
 
-    sprintf(binPath, "captures/snap_%llu.bin", ts);
-    sprintf(bmpPath, "captures/snap_%llu.bmp", ts);
+    sprintf(binPath, CAPTURES_DIR "/snap_%llu.bin", ts);
+    sprintf(bmpPath, CAPTURES_DIR "/snap_%llu.bmp", ts);
 
     pc_save_state_to_file(&cpuState, binPath);
     save_bmp(bmpPath);
@@ -753,10 +756,10 @@ static int hal_handler(void) {
                     g_streamCapture = nullptr;
                     printf("[stream] Recording stopped\n");
                 } else {
-                    CreateDirectoryA("captures", NULL);
+                    CreateDirectoryA(CAPTURES_DIR, NULL);
                     cpu_get_state(&cpuState);
                     char streamPath[MAX_PATH];
-                    sprintf(streamPath, "captures/stream_%u.tamstream", cpuState.tick_counter);
+                    sprintf(streamPath, CAPTURES_DIR "/stream_%u.tamstream", cpuState.tick_counter);
                     g_streamCapture = new StreamCapture();
                     g_streamCapture->start(streamPath, cpuState.tick_counter, cpuState.memory);
                     lastStreamSnapshotTick = cpuState.tick_counter;
@@ -1001,10 +1004,10 @@ int main(int argc, char **argv) {
 
 #ifdef STREAM_CAPTURE_ENABLED
     if (autoStream) {
-        CreateDirectoryA("captures", NULL);
+        CreateDirectoryA(CAPTURES_DIR, NULL);
         cpu_get_state(&cpuState);
         static char autoStreamPath[MAX_PATH];
-        sprintf(autoStreamPath, "captures/stream_%u.tamstream", cpuState.tick_counter);
+        sprintf(autoStreamPath, CAPTURES_DIR "/stream_%u.tamstream", cpuState.tick_counter);
         g_streamCapture = new StreamCapture();
         g_streamCapture->start(autoStreamPath, cpuState.tick_counter, cpuState.memory);
         lastStreamSnapshotTick = cpuState.tick_counter;
@@ -1056,11 +1059,11 @@ int main(int argc, char **argv) {
 #ifdef STREAM_CAPTURE_ENABLED
                 /* Stream capture periodic tasks */
                 if (g_streamCapture && g_streamCapture->isActive()) {
+                    cpu_get_state(&cpuState);
                     uint32_t tick = cpuState.tick_counter;
 
                     /* RAM snapshot every 1 emu-minute */
                     if (tick - lastStreamSnapshotTick >= 60 * TICK_FREQUENCY) {
-                        cpu_get_state(&cpuState);
                         g_streamCapture->logRamSnapshot(tick, cpuState.memory);
                         lastStreamSnapshotTick = tick;
                     }
