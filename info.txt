@@ -1,0 +1,202 @@
+The adult character that can be obtained is based off what teen character is obtained, whether they are type one or two, and number of care and discipline mistakes made. A care mistake is made when the happy or hunger meter is at zero and is not taken care of within 15 minutes. A discipline mistake is made when the Tamagotchi misbehaves (calling out for attention when neither of its meters are empty) and they are not disciplined within 15 minutes.
+
+Note that care and discipline mistakes are cumulative between the child and teen stage when it comes to determining the adult evolution. As an example, if one discipline call is missed with Marutchi and perfect care is taken with the resulting type one Tamatchi, Ginjirotchi will be obtained.
+Generation 1
+Name 	Artwork 	Sprite 	Stage 	Sleep Times 	Lifespan 	Evolution Conditions
+Babytchi 	
+Babytchi tah
+	
+Babytchi anim gen1
+	Baby 	5 min nap 	65 mins 	
+
+    Hatches from egg after 5 minutes
+
+Marutchi 	
+Marutchi tah
+	
+Marutchi anim gen1
+	Child 	8pm-9am 	48 hrs 	
+
+    Always evolves from Babytchi after 65 minutes
+
+Tamatchi 	
+Tamatchi tah
+	
+Tamatchi anim gen1
+	Teen 	9pm-9am 	72 hrs 	
+
+    0-2 care mistakes
+    Type one is 0-2 discipline mistakes
+    Type two is 3+ discipline mistakes
+
+Kuchitamatchi 	
+Kuchitamatchi tah
+	
+Kuchitamatchi anim gen1
+	Teen 	9pm-9am 	48 hrs 	
+
+    3+ care mistakes
+    Type one is 0-2 discipline mistakes
+    Type two is 3+ discipline mistakes
+
+Mametchi 	
+Mametchi tah
+	
+Mametchi anim gen1
+	Adult 	10pm-9am 	15-16 days 	
+
+    0-2 care mistakes
+    0 discipline mistakes
+    From Tamatchi (type one) only
+
+Ginjirotchi 	
+Ginjirotchi tah
+	
+Ginjirotchi anim gen1
+	Adult 	10pm-9am 	11-12 days 	
+
+    0-2 care mistakes
+    1 discipline mistake
+    From Tamatchi (type one) only
+
+Maskutchi 	
+Maskutchi tah
+	
+Maskutchi anim gen1
+	Adult 	11pm-11am 	15-16 days 	
+
+    Tamatchi (type one): 0-2 care mistakes, 2+ discipline mistakes
+    Tamatchi (type two): 0-3 care mistakes, 2+ discipline mistakes
+
+Kuchipatchi 	
+Kuchipatchi tah
+	
+Kuchipatchi anim gen1
+	Adult 	10pm-9am 	5-6 days 	
+
+    3+ care mistakes
+    Tamatchi (type one): 0-1 discipline mistakes
+    Kuchitamatchi (type one): 0-1 discipline mistakes
+
+Nyorotchi 	
+Nyorotchi tah
+	
+Nyorotchi anim gen1
+	Adult 	10pm-9am 	2-3 days 	
+
+    Tamatchi (type one): 3+ care mistakes & 2-3 discipline mistakes
+    Tamatchi (type two): 4+ care mistakes & 3-7 discipline mistakes
+    Kuchitamatchi (type one): 3+ care mistakes & 2 discipline mistakes
+    Kuchitamatchi (type two): 3+ care mistakes & 3-5 discipline mistakes
+
+Tarakotchi 	
+Tarakotchi tah
+	
+Tarakotchi anim gen1
+	Adult 	10pm-10am 	3-4 days 	
+
+    Tamatchi (type one): 3+ care mistakes & 4+ discipline mistakes
+    Tamatchi (type two): 4+ care mistakes & 8+ discipline mistakes
+    Kuchitamatchi (type one): 3+ care mistakes & 3+ discipline mistakes
+    Kuchitamatchi (type two): 3+ care mistakes & 6+ discipline mistakes
+
+Oyajitchi 	
+Oyajitchi tah
+	
+Oyajitchi anim gen1
+	Special 	10pm-9am 	15-16 days 	
+
+    Exclusive to Japanese versions
+    Evolves from a Maskutchi raised from a type two Tamatchi; care does not matter, and it will evolve after 4 days
+
+Bill 	
+Bill tah
+	
+Bill anim gen1
+	Special 	10pm-9am 	15-16 days 	
+
+    Exclusive to International versions
+    Evolves from a Maskutchi raised from a type two Tamatchi; care does not matter, and it will evolve after 4 days
+
+
+
+Growth, Care, and Lifespan
+
+Once the device starts, an egg will appear on the screen. Five minutes after the clock is set, the Tamagotchi will be born, and will go through several stages of life. It begins with the Baby stage and evolves to the Child stage after 65 minutes. It will evolve into a teen at the age of 3, and into an adult by the age of 6. What Teenager and Adult stage it will evolve into are based on the quality of care the user has given the Tamagotchi throughout its life. Each version of the classic Tamagotchi has one Baby character, one Child character, two Teenager characters, six Adult characters, and one Special character that evolves from one of the six Adults.
+
+Which teen and adult characters the user can raise is dependent on the quality of care provided throughout the Tamagotchi's life. Better quality care increases the likelihood of raising a healthy adult character. The most vital care factors include the following:
+
+    Hungry and Happy Meters: Filling the meters before they empty completely is good quality care, while allowing them to empty before filling them is bad care. The sooner the user responds to an empty heart, the better.
+    Games vs. Snacks: Filling the Tamagotchi's Happy meter by playing the game instead of feeding snacks is good quality care, and it has the added benefit of keeping the weight low.
+    Response Time: Quickly responding to cleaning up poo, curing sickness, and turning off the lights is good quality care.
+    Discipline: Discipline functions differently between the original and reproduced devices, but the core functionality is the same: responding to every discipline call is good quality care, while missing calls bad care.
+
+A Tamagotchi will eventually die of old age, and the maximum lifespan varies from character to character. As a Tamagotchi grows older, they will begin to lose hearts faster and faster - on the original releases, the heart loss rate caps at 1 Hungry heart every 6 minutes, and 1 Happy heart every 7 minutes. On the 2017 rereleases, the heart loss rate caps at about 1 of each at every 16 minutes. Severely neglecting a Tamagotchi - overfeeding snacks, not responding to Hungry and Happy calls, not disciplining when called, and not curing its sickness - may cause it to die prematurely.
+Clock
+
+The user must set the time before the Tamagotchi can hatch. Pressing the B button when no icon is highlighted will bring up the clock screen and holding A and C will allow them to adjust the time - doing the latter is not necessary from a fresh start. A adds hours, B adds minutes and C confirmed the new time, and pressing B again will return to the normal screen. The Tamagotchi will not age, lose hearts, poop etc. as long as the clock is in adjustment mode, thereby allowing it to be used as a "Pause" mode.
+Feed
+Food icon p1
+
+The user uses this icon to feed their Tamagotchi either a meal or snack. Meals fill the Hungry hearts, and each meal adds 1 to the Tamagotchi's weight. Snacks raise one Happy heart and add 2 to the Tamagotchi's weight. Feeding a Tamagotchi too many snacks within a short period of time will make it sick, and continuously doing so will kill it. Overfeeding a Tamagotchi snacks is the only way it can die during the baby stage - this is not possible on the rereleases.
+
+On the rerelease models, snacks have a significantly stronger impact on the Tamagotchi's overall lifespan; feeding it too many snacks may trigger it to die before reaching its next growth stage, including in the child and teen stages.
+
+For the first generation, the meal is a bowl of rice on the Japanese edition, and a slice of bread on the International editions. The snack in all regions is a piece of candy in a wrapper.
+
+For the second generation, the meal is an onigiri in Japan, and a hamburger for English editions. The snack on all versions is a slice of cake. On the English release, the food options are shown as pictures rather than words.
+Light
+Lights icon p1
+
+When the Tamagotchi goes to sleep, the user selects this icon to turn the lights on or off. Not turning the lights off before the Attention icon vanishes will result in a care mistake. A Tamagotchi will only grow and age while it is awake, and a year will be added to its age on the check meter every time it wakes up. Every Tamagotchi has its own waking and sleeping hours. Turning off the lights while the Tamagotchi is awake will not impact its health, but will make it impossible for the user to see if the Tamagotchi has made a poo or gotten sick.
+Game
+Game icon p1
+
+This icon allows the user to play a game with their Tamagotchi to raise its happiness and lower its weight. Playing a complete game will always reduce the Tamagotchi's weight by 1. Each game lasts five rounds, and if the user wins a minimum of three rounds, the game is won and the Tamagotchi fills one Happy heart. Once five rounds are played, it will show a results screen showing how well the game was played. If the user presses A or B after the results screen, a new game will start. If the Tamagotchi poops, gets sick, calls for attention, or falls asleep while in the process of playing the game, the game will not resume after the results screen.
+Left or Right
+
+The game featured on the original Tamagotchi is "Left or Right". The user must guess whether their Tamagotchi turns left or right. The A button chooses left, while the B button chooses right. The C button returns to the main screen. When playing with certain adults, there may be a several second delay between the press of the button and the Tamagotchi turning.
+Higher or Lower
+
+The game featured on the second generation Tamagotchi is "Higher or Lower". The Tamagotchi presents a number, and the player must guess whether the next number it thinks of will be higher (B button) or lower (A button) than the displayed number. It cannot pick a number higher than 9, or lower than 1. On the original release, the number the Tamagotchi starts with in its lifespan is 5, and the second number it chooses will be the initial number of the next round and subsequent games. On the rerelease models, the Tamagotchi may start every round with a new number rather than the second one it thought of from the previous round.
+Medicine
+Medicine icon p1
+Medicine icon p2
+
+When the Tamagotchi becomes ill, a skull will appear on the top right corner of the Tamagotchi, and they will refuse to eat or play. Using the Medicine icon will heal them. It may take one or two doses to cure the sickness. The Tamagotchi will get ill prior to evolution, before death, with old age, if poo has been left on the screen for too long, or if fed too many snacks. Every time the Tamagotchi gets sick from old age, its stats will begin to decrease at a faster pace.
+
+The icon is a syringe on all Japanese versions, and on all English generation 1 models. For English generation 2 models in 1997, it is a bottle of medicine with a spoon. On the 2017 rereleases, the icon is a syringe on all versions in all regions.
+Bathroom
+Bathroom icon p1
+
+Throughout its life, the Tamagotchi will leave poo on the screen. The user must select this icon to clear it away. Leaving poo on the screen for too long may result in illness, while multiple poop on the screen drastically increase the likelihood of illness. The baby will poo twice (15 and 40-45 minutes after hatching) before it evolves. Once at the child stage, it will leave poo after five minutes, and then one poo every three hours.
+Meter
+Status icon p1
+
+The Tamagotchi features a Health meter screen that shows the Tamagotchi's overall stats. The first screen displays age (one year being the equivalent of one day) and weight (measured in grams on the Japanese versions, ounces on international P1s, and pounds on international P2s), the second displays Discipline, the third shows Hungry, and the fourth shows Happy. There are a total of four hearts each for hunger and happiness, with white hearts representing an empty stat. The rate at which hearts decrease depends on the character, and also how old they are in regards to adults. Using the Health meter regularly allows the user to know their Tamagotchi's needs, allowing them to make decisions that influence the Tamagotchi's overall care, which in turn impact the Tamagotchi's evolutions throughout its life cycle.
+Discipline
+Training icon p1
+
+The Discipline icon is used to scold the Tamagotchi for misbehavior. Occasionally, the Tamagotchi will call for attention when its Hungry and Happy meters are not completely empty, and refuse to eat or play games. When this occurs, the user must use the Discipline icon. When used correctly, a special sound effect will play and the attention icon will turn off. Disciplining the Tamagotchi when is not misbehaving will have no effect on it. The amount of discipline the Tamagotchi receives directly affects what they grow up into. Each successful response adds 25% to the discipline meter, but the discipline level may be reduced on evolution.
+
+On the original release, during each growth stage, the Tamagotchi will only make enough discipline calls to completely fill the meter from however full it presently is (for example, Marutchi and Tonmarutchi will make four discipline calls, while a teen who began with 50% discipline will make two). If the Tamagotchi evolves into an adult that begins with a full discipline meter, it will not make discipline calls.
+
+On the 2017 rerelease, the Tamagotchi will make more calls than necessary to fill the discipline meter. However, the user must also respond to the extra calls; missing calls, even when the meter is full, will affect which adult the Tamagotchi will grow into.
+
+If the Tamagotchi evolves within fifteen minutes of a discipline call, the user will still have a chance to discipline them until the attention icon turns off as usual.
+Attention
+Attention icon p1
+
+This icon cannot be selected and lights up on its own when the Tamagotchi needs something - Hungry or Happy being completely empty, falling asleep and requiring the lights to be turned off, or making a false call and requiring discipline. If the user does not tend to their needs within 15 minutes, the icon will turn off and a care mistake will occur (unless the Tamagotchi was making a discipline call). If a Tamagotchi dies from neglect while the attention icon is on, it will remain lit on the death screen until a new egg appears. The Tamagotchi will not call for attention when it poops, nor if it gets ill.
+Death
+
+A Tamagotchi will eventually die due to either neglect or old age, with each adult having their own lifespan. The death screen varies by region: the Japanese models show a ghost floating beside a gravestone, the English P1 shows an angel flying among stars, and the English P2 shows a UFO in space. If the user maintained good care during the adult stage, it will show an additional animation of the Tamagotchi laying an egg just before it passes. These eggs don't hatch into anything and disappear after the death sequence ends. Child and teen characters will never lay eggs upon death. If a baby dies, it skips the death sequence entirely, with the screen fading away similar to the evolution screen before showing the death screen.
+
+Pressing the C button will scroll the screen to the right to show the Tamagotchi's final age, and pushing it again will go back to the normal death screen. The B button cannot be pushed to view the clock, and pressing the A and C buttons simultaneously will bring up a new egg to hatch, starting the cycle over.
+Sound and Battery
+
+Pressing the A and C buttons simultaneously will disable or enable the sound, indicated by a unique beep. This can only be done on the main screen, and won't work if the Tamagotchi is dead or in the middle of a specific animation, such as pooping or dying.
+
+Five seconds after the last sound effect is played, the Tamagotchi will enter a power-saving mode, indicated by the screen dimming slightly. It will come out of this mode the next time a sound is played, whether on its own volition or through the user pressing a button. The Tamagotchi can be kept in this mode perpetually by turning the sound off.
+
+The original Tamagotchi had no low battery screen, and the Tamagotchi would continue to run, even if the batteries went critically low. If it went low, the Tamagotchi would make it vanish really slowly. All Tamagotchi releases afterward, starting from the Mothra Tamagotchi in Japan and the Tamagotchi Angel internationally, would feature a low battery screen. The 20th Anniversary re-release features a low battery screen, indicated by a sprite of a battery with a large X over it. 
