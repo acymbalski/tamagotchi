@@ -65,6 +65,7 @@ uint8_t getTamaPoop();
 uint8_t getTamaSickness();
 uint8_t getTamaDiscipline();
 bool isTamaSick();
+bool isTamaRequestingAttention();
 
 void hatchEgg();
 void feedTamaFood();

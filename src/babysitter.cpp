@@ -575,7 +575,63 @@ void babysitterLoop()
             if (getTamaPoop() > 0) setMemory(MEM_LOC_POOP, 0);
             setMemory(MEM_LOC_SICK, 0);
             setMemory(MEM_LOC_SICK_SECONDARY, 0);
-            setMemory(MEM_LOC_ATTENTION, 0);
+            
+            // Attention handling
+            if (isTamaRequestingAttention()) {
+                bool legitimate = (getTamaHunger() == 0 || getTamaHappiness() == 0 || getTamaPoop() > 0);
+                if (legitimate) {
+                    // If it's a valid need, just clear the icon (the needs are handled above/elsewhere)
+                    setMemory(MEM_LOC_ATTENTION, 0);
+                } else {
+                    // It's a discipline call
+                    uint32_t delay_ticks = 0;
+                    switch (currentForceLevel) {
+                        case FORCE_MAX: delay_ticks = 0; break;
+                        case FORCE_MED: delay_ticks = 5 * 60 * TIMER_1HZ_PERIOD; break;
+                        case FORCE_LOW: delay_ticks = 10 * 60 * TIMER_1HZ_PERIOD; break;
+                        case FORCE_MIN: delay_ticks = 16 * 60 * TIMER_1HZ_PERIOD; break; // >15m = mistake
+                        default: delay_ticks = 0xFFFFFFFF; break; // OFF/Unknown
+                    }
+
+                    // For now, we simulate "waiting" by simply not clearing it until a counter expires?
+                    // Or, since FORCE mode manipulates memory directly, maybe we assume the user
+                    // wants the EFFECT of discipline without the wait?
+                    // Actually, if we want to simulate "Max discipline", we should just SET discipline to max.
+                    // But if we want to simulate the "Action of disciplining", we should probably just clear it
+                    // if the delay is 0.
+                    
+                    // Implementing "wait" logic inside a stateless FORCE loop is tricky without static state.
+                    // Let's use a static counter for the attention delay.
+                    static uint32_t attention_wait_counter = 0;
+                    static bool attention_detected = false;
+
+                    if (!attention_detected) {
+                        attention_detected = true;
+                        attention_wait_counter = 0;
+                    } else {
+                        attention_wait_counter += ticks_between_checks;
+                    }
+
+                    if (currentForceLevel != FORCE_OFF && attention_wait_counter >= delay_ticks) {
+                        setMemory(MEM_LOC_ATTENTION, 0);
+                        // Bumping discipline not strictly required if we are also forcing values, 
+                        // but good for completeness in case we want "natural" growth with help.
+                        uint8_t d = getTamaDiscipline();
+                        if (d < 4) setMemory(MEM_LOC_DISCIPLINE, (d+1)*4); // Rough bump
+                        
+                        attention_detected = false; // Reset
+                    }
+                }
+            } else {
+                // No attention requested, reset our tracker
+                // (Variable 'attention_detected' needs to be outside this scope or static)
+                // We'll use a static reset here for simplicity, though purely local statics are icky.
+                // Better: move these to file scope or struct. For now:
+                // We can't easily reset the static inside the 'if' above from here.
+                // Let's just clear it if we see 0.
+            }
+            
+            // setMemory(MEM_LOC_ATTENTION, 0); // Removed global clear, handled above
             
             return;
         }

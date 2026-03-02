@@ -840,7 +840,8 @@ int main(int argc, char **argv) {
     fflush(stdout);
 
     while (!exitRequested) {
-        for (int i = 0; i < 1024; i++) {
+        int batchSize = (speedIndex == 2) ? 10240 : 1024;
+        for (int i = 0; i < batchSize; i++) {
             tamalib_mainloop_step_by_step(isPaused ? 1 : 0);
 
             if (!isPaused) {
