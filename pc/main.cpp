@@ -394,7 +394,10 @@ static void draw_stats_panel(void) {
     sprintf(buf, "%doz", wgt_tens * 10 + wgt_ones);
     STAT_ROW("WGT:", buf, 220, 220, 220);
 
-    sprintf(buf, "%dyr", readMemory(MEM_LOC_AGE));
+    uint8_t age_raw = readMemory(MEM_LOC_AGE);
+    uint8_t age_tens = (age_raw & 0xF0) >> 4;
+    uint8_t age_ones = (age_raw & 0x0F);
+    sprintf(buf, "%dyr", age_tens * 10 + age_ones);
     STAT_ROW("AGE:", buf, 220, 220, 220);
 
     uint8_t poop = getTamaPoop();

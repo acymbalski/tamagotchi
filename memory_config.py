@@ -6,9 +6,12 @@ MAP = {
     "discipline":   {"addr": 0x043, "type": "level"},       # 0-F scaled to 0-4
     "attention":    {"addr": 0x02D, "type": "bool"},        # Non-zero = needs attention
     "poop":         {"addr": 0x04D, "type": "nibble"},      # Count of poops
-    "sick":         {"addr": 0x049, "type": "level"},       # 0-F scaled to 0-4
+    "sick":         {"addr": 0x049, "type": "level"},       # 0-F scaled to 0-4; derived flag — ROM re-asserts from 0x06D
+    "sick_flag2":   {"addr": 0x06D, "type": "bool"},        # Authoritative sick register — 1=sick, 0=healthy; lower nibble of byte 0x036 # NOTE: Unclear
+    "sick_level":   {"addr": 0x048, "type": "nibble"},      # Illness level counter — 0xF=max sick, decreases with medicine # NOTE: Unclear
+    "sick_severity":{"addr": 0x0F3, "type": "nibble"},      # Death timer — counts up naturally, medicine resets it; 0=cured # NOTE: Unclear
     "sleeping":     {"addr": 0x04A, "type": "sleep_logic"}, # 8-F is sleeping
-    "age":          {"addr": 0x054, "type": "nibble"},      # Age in years
+    "age":          {"addr": 0x054, "type": "bcd"},         # Age in years (BCD)
     "weight":       {"addr": 0x046, "type": "bcd"},         # Weight in oz
     "lifecycle":    {"addr": 0x05D, "type": "stage_logic"}, # Lifecycle stage (0, 1, 2, 4...)
     "character":    {"addr": 0x050, "type": "nibble"},      # Character within stage (0x050 correlates well)
@@ -57,8 +60,8 @@ def get_value(mem, key):
         return "Egg (New)" if decode_nibble(mem, addr) == 0 else "Unknown"
     elif ctype == "stage_logic":
         val = decode_nibble(mem, addr)
-        # Binary: 0=Egg, 1=Baby, 2=Child, 4=Teen, 8=Adult, 16=Special
-        mapping = {0: "Egg", 1: "Baby", 2: "Child", 4: "Teen", 8: "Adult", 16: "Special"}
+        # Observed: 0=Egg, 1=Baby, 2=Child, 4=Teen, 9=Adult (NOT 8 — confirmed from captures)
+        mapping = {0: "Egg", 1: "Baby", 2: "Child", 4: "Teen", 9: "Adult", 16: "Special"}
         return mapping.get(val, "Unknown")
     
     return None

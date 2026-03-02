@@ -496,11 +496,26 @@ bool setTimeViaNTP()
 void forceAgeUp()
 {
     uint8_t age = readMemory(MEM_LOC_AGE);
-    setMemory(MEM_LOC_AGE, age + 1);
-    Serial.print("forceAgeUp: age ");
-    Serial.print(age);
-    Serial.print(" -> ");
-    Serial.println(age + 1);
+    // BCD increment
+    uint8_t lower = age & 0x0F;
+    uint8_t upper = (age & 0xF0) >> 4;
+    
+    if (lower == 9) {
+        lower = 0;
+        upper++;
+    } else {
+        lower++;
+    }
+    
+    if (upper > 9) upper = 0; // Wrap at 99->00
+    
+    uint8_t new_age = (upper << 4) | lower;
+    setMemory(MEM_LOC_AGE, new_age);
+    
+    Serial.print("forceAgeUp: age 0x");
+    Serial.print(age, HEX);
+    Serial.print(" -> 0x");
+    Serial.println(new_age, HEX);
 
 #if MEM_LOC_CARE_MISTAKES != 0x3FF
     // Zero care mistakes so the ROM picks the best-quality character at evolution.
@@ -573,17 +588,33 @@ void babysitterLoop()
             
             // Instantly clear poop, sickness, and attention in any FORCE level
             if (getTamaPoop() > 0) setMemory(MEM_LOC_POOP, 0);
-            setMemory(MEM_LOC_SICK, 0);
-            setMemory(MEM_LOC_SICK_SECONDARY, 0);
+            setMemory(MEM_LOC_SICK, 0);          // 0x049: visible sick flag
+            setMemory(MEM_LOC_SICK_SECONDARY, 0);// 0x048: illness level counter (stays at 15 otherwise)
+            //setMemory(0x06D, 0);                 // lower nibble of byte 0x036: authoritative sick flag
+            // NOTE: do NOT write 0x06C (upper nibble of same byte) — 0x060-0x07F is likely CPU call stack
+            //setMemory(MEM_LOC_SICK_SEVERITY, 0); // 0x0F3: death timer
+            
+            // Force weight to a healthy 20oz to prevent weight-induced sickness loop
+            // 20 = 0x20 in BCD (tens=2, ones=0)
+            // Memory is [ones, tens]
+            // setMemory(MEM_LOC_WEIGHT, 0);
+            // setMemory(MEM_LOC_WEIGHT + 1, 2);
             
             // Attention handling
             if (isTamaRequestingAttention()) {
-                bool legitimate = (getTamaHunger() == 0 || getTamaHappiness() == 0 || getTamaPoop() > 0);
+                // Attention is legitimate if needs are unmet OR if sleeping (lights call)
+                // Actually, lights call is a separate icon, but attention icon might linger?
+                // Standard rules: Attention is valid if Hunger=0, Happy=0, Poop>0, Sick
+                // If Sleeping, attention icon is usually off unless lights need handling?
+                // Let's assume if sleeping, we should not discipline.
+                
+                bool legitimate = (getTamaHunger() == 0 || getTamaHappiness() == 0 || getTamaPoop() > 0 || isTamaSick() || isTamaSleeping());
+                
                 if (legitimate) {
                     // If it's a valid need, just clear the icon (the needs are handled above/elsewhere)
                     setMemory(MEM_LOC_ATTENTION, 0);
                 } else {
-                    // It's a discipline call
+                    // It's a discipline call (unwarranted attention)
                     uint32_t delay_ticks = 0;
                     switch (currentForceLevel) {
                         case FORCE_MAX: delay_ticks = 0; break;
@@ -592,16 +623,7 @@ void babysitterLoop()
                         case FORCE_MIN: delay_ticks = 16 * 60 * TIMER_1HZ_PERIOD; break; // >15m = mistake
                         default: delay_ticks = 0xFFFFFFFF; break; // OFF/Unknown
                     }
-
-                    // For now, we simulate "waiting" by simply not clearing it until a counter expires?
-                    // Or, since FORCE mode manipulates memory directly, maybe we assume the user
-                    // wants the EFFECT of discipline without the wait?
-                    // Actually, if we want to simulate "Max discipline", we should just SET discipline to max.
-                    // But if we want to simulate the "Action of disciplining", we should probably just clear it
-                    // if the delay is 0.
                     
-                    // Implementing "wait" logic inside a stateless FORCE loop is tricky without static state.
-                    // Let's use a static counter for the attention delay.
                     static uint32_t attention_wait_counter = 0;
                     static bool attention_detected = false;
 
@@ -614,8 +636,15 @@ void babysitterLoop()
 
                     if (currentForceLevel != FORCE_OFF && attention_wait_counter >= delay_ticks) {
                         setMemory(MEM_LOC_ATTENTION, 0);
-                        // Bumping discipline not strictly required if we are also forcing values, 
-                        // but good for completeness in case we want "natural" growth with help.
+                        
+                        // Only bump discipline if we haven't maxed it out
+                        // AND we just cleared the attention.
+                        // Since this loop runs repeatedly, we need to be careful not to bump it 
+                        // multiple times for the same event if we fail to clear attention (which we just did).
+                        // But we just did setMemory(MEM_LOC_ATTENTION, 0), so on the next tick,
+                        // isTamaRequestingAttention() will be false, and attention_detected will reset.
+                        // So a single bump here is safe.
+                        
                         uint8_t d = getTamaDiscipline();
                         if (d < 4) setMemory(MEM_LOC_DISCIPLINE, (d+1)*4); // Rough bump
                         

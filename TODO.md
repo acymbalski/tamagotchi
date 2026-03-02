@@ -8,7 +8,7 @@
 
 - [x] Add option for PC sim to reset sim
 
-- [ ] Review eggInitiated flag (babysitter.cpp) when implementing tama death/restart. When the tama dies and a new egg starts, eggInitiated will be true from the previous life cycle and the new egg will never be auto-hatched. Need to detect the death-to-new-egg transition and call resetBabysitterState() at the right moment.
+- [ ] Review eggInitiated flag (babysitter.cpp) when implementing tama death/restart. When the tama dies and a new egg starts, eggInitiated will be true from the previous life cycle and the new egg will never be auto-hatched. Need to detect the death-to-new-egg transition and call resetBabysitterState() at the right moment. **NOTE (confirmed via captures):** The ROM transitions directly from lifecycle=9 (Adult) to lifecycle=1 (Baby) — it does NOT pass through lifecycle=0 (Egg). So `isTamaEgg()` never fires on death. Detection must look for the Adult→Baby lifecycle jump instead.
 
 - [ ] Defensive test cases (likely requires more robust state/screen detection as well as a collection of saved RAM states)
 
@@ -25,6 +25,8 @@
 - [ ] Allow a "fake" babysitter that will just literally set hunger/poop/happy values so we won't die and can sim forever
 
 - [x] Investigator - Moving forward, then back (no changes/commit) will save an annotation with a mod on "Screen" and "Stage" (as Main/Unknown)
+
+- [ ] In some cases, when falling asleep and Attention is requested (or something?), Discipline will cycle from 0-3 (or maybe 4?) and back again
 
 ---
 
@@ -95,10 +97,15 @@
       year per day). Cross-check that captured age values align with wakeup events, not
       real-time elapsed. The current 100% confidence is strong but based on a limited dataset.
 
-- [ ] **Investigate Sickness vs. Dying Counter** — Sickness appears to be a multi-address
-      state. Investigate if `0x048` and `0x049` represent a level and a "time until death"
-      counter, or if there is another "dying" flag. Display the raw values of these addresses
-      in our PC sim.
+- [ ] **Sickness is a 4-address system** — Confirmed via delta analysis (see INVESTIGATION_SICKNESS.md):
+      - `0x049` = derived visible sick flag (ROM re-asserts this from `0x06D`)
+      - `0x06D` = authoritative sick register (lower nibble of byte 0x036); root of Force mode oscillation
+      - `0x048` = illness level counter (0xF=max sick, decreases with medicine, ~5 at cure)
+      - `0x0F3` = death timer (counts up naturally, medicine resets it, 0=cured)
+      To fix Force mode oscillation: clear all four. DO NOT write `0x06C` (upper nibble of byte 0x036) —
+      it is not a stable data register and corrupts the ROM when written. Fix blocked on death-rebirth
+      freeze (tama must survive long enough to observe steady-state behaviour). Display raw values
+      of all four in the PC sim stats panel. NOTE: This is not proven.
 
 - [ ] **Develop Memory Editor** — Add a tool or feature to poke values directly into RAM
       while the sim is running. (Target: poke `0x050` to verify character ID overrides).
