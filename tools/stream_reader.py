@@ -4,6 +4,8 @@
 import struct
 import os
 import sys
+import bisect
+from collections import defaultdict
 
 # Record type tags
 REC_RAM_SNAPSHOT     = 0x01
@@ -137,6 +139,15 @@ class TamStream:
 
         if progress_callback:
             progress_callback(100, f"Indexed {self._record_count:,} records")
+
+        # Build LCD change index: ticks where display actually changed
+        self._lcd_change_ticks = []
+        prev_data = None
+        for tick, offset in self._lcd_frame_index:
+            frame_data = self.read_lcd_frame_at(offset)
+            if prev_data is not None and frame_data != prev_data:
+                self._lcd_change_ticks.append(tick)
+            prev_data = frame_data
 
     @property
     def tick_range(self):
@@ -313,6 +324,22 @@ class TamStream:
         """Generator of (tick, button_id, state) tuples."""
         return list(self._button_records)
 
+    def next_lcd_change(self, current_tick):
+        """Return the tick of the next LCD screen change after current_tick, or None."""
+        import bisect
+        idx = bisect.bisect_right(self._lcd_change_ticks, current_tick)
+        if idx < len(self._lcd_change_ticks):
+            return self._lcd_change_ticks[idx]
+        return None
+
+    def prev_lcd_change(self, current_tick):
+        """Return the tick of the previous LCD screen change before current_tick, or None."""
+        import bisect
+        idx = bisect.bisect_left(self._lcd_change_ticks, current_tick)
+        if idx > 0:
+            return self._lcd_change_ticks[idx - 1]
+        return None
+
     def read_lcd_frame_at(self, file_offset):
         """Read LCD frame data from a known file offset."""
         f = self._file
@@ -423,6 +450,11 @@ class CachedStateTracker:
                 progress_callback(None, f"Building write index... {len(writes):,} writes")
 
         self._writes = writes
+        self._write_ticks = [w[0] for w in writes]
+        # Per-address write index: addr -> sorted list of indices into _writes
+        self._addr_write_indices: dict[int, list[int]] = defaultdict(list)
+        for i, (tick, addr, new_val, old_val, source, func_id) in enumerate(writes):
+            self._addr_write_indices[addr].append(i)
         if progress_callback:
             progress_callback(None, f"Write index complete: {len(writes):,} writes")
 
@@ -492,7 +524,7 @@ class CachedStateTracker:
         import bisect
         snap_tick = best_snap[0]
         # Find start position in writes list
-        start_idx = bisect.bisect_left([w[0] for w in self._writes], snap_tick)
+        start_idx = bisect.bisect_left(self._write_ticks, snap_tick)
 
         # Apply writes from snapshot through target tick
         self._write_cursor = start_idx
@@ -573,3 +605,40 @@ class CachedStateTracker:
                 self._apply_nibble(addr, old_val)
                 self._last_diff[addr] = (cur_val, old_val)
             self._current_tick = tick
+
+    def next_write_to_addrs(self, addrs):
+        """Return tick of next write to any addr in the set, after current cursor."""
+        if not addrs:
+            return None
+        best_tick = None
+        for addr in addrs:
+            indices = self._addr_write_indices.get(addr)
+            if not indices:
+                continue
+            # Find first index > current cursor
+            pos = bisect.bisect_right(indices, self._write_cursor - 1)
+            # Skip entries at or before cursor
+            while pos < len(indices) and indices[pos] < self._write_cursor:
+                pos += 1
+            if pos < len(indices):
+                tick = self._writes[indices[pos]][0]
+                if best_tick is None or tick < best_tick:
+                    best_tick = tick
+        return best_tick
+
+    def prev_write_to_addrs(self, addrs):
+        """Return tick of prev write to any addr in the set, before current cursor."""
+        if not addrs:
+            return None
+        best_tick = None
+        for addr in addrs:
+            indices = self._addr_write_indices.get(addr)
+            if not indices:
+                continue
+            # Find last index < current cursor
+            pos = bisect.bisect_left(indices, self._write_cursor) - 1
+            if pos >= 0:
+                tick = self._writes[indices[pos]][0]
+                if best_tick is None or tick > best_tick:
+                    best_tick = tick
+        return best_tick

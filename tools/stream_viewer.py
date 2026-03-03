@@ -4,6 +4,9 @@
 import sys
 import os
 import bisect
+import struct
+import tempfile
+import subprocess
 
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -14,12 +17,14 @@ from stream_reader import (
     BUTTON_NAMES, BUTTON_STATES,
 )
 from annotation_store import AnnotationStore
+from bookmark_store import BookmarkStore
 import memory_config
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QSlider, QPushButton, QScrollArea, QFrame, QMessageBox,
-    QLineEdit, QSplitter, QToolTip, QMenu, QProgressDialog,
+    QLineEdit, QSplitter, QToolTip, QMenu, QProgressDialog, QFileDialog,
+    QInputDialog,
 )
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QFontMetrics
 from PyQt6.QtCore import Qt, QTimer, QPoint
@@ -105,7 +110,8 @@ class LcdWidget(QWidget):
         bg = QColor(200, 210, 200)
         painter.fillRect(self.rect(), bg)
 
-        pixel_area_h = 128  # 16 rows * 8px each
+        icon_row_h = max(14, self.height() // 10)  # ~10% of height for icons
+        pixel_area_h = self.height() - icon_row_h - 2
         icon_area_y = pixel_area_h + 2
 
         if not self._has_matrix_data():
@@ -136,7 +142,8 @@ class LcdWidget(QWidget):
         if len(self.frame_data) >= 72:
             icon_data = self.frame_data[64:72]
             slot_w = self.width() // self.ICON_NUM
-            font = QFont("Consolas", 7)
+            font_size = max(5, min(7, icon_row_h // 2))
+            font = QFont("Consolas", font_size)
             font.setStyleHint(QFont.StyleHint.Monospace)
             painter.setFont(font)
 
@@ -144,16 +151,46 @@ class LcdWidget(QWidget):
                 on = icon_data[i] != 0
                 ix = i * slot_w
                 if on:
-                    painter.fillRect(ix + 2, icon_area_y, slot_w - 4, 12,
+                    painter.fillRect(ix + 2, icon_area_y, slot_w - 4, icon_row_h - 2,
                                      QColor(20, 20, 100))
                     painter.setPen(QColor(200, 210, 200))
                 else:
                     painter.setPen(QColor(140, 150, 140))
                 label = self.ICON_LABELS[i] if i < len(self.ICON_LABELS) else f"I{i}"
-                painter.drawText(ix, icon_area_y, slot_w, 14,
+                painter.drawText(ix, icon_area_y, slot_w, icon_row_h,
                                  Qt.AlignmentFlag.AlignCenter, label)
 
         painter.end()
+
+
+# ===========================================================================
+# LcdPopupWidget
+# ===========================================================================
+
+class LcdPopupWidget(QWidget):
+    """Small floating popup showing LCD preview at a timeline tick."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.WindowType.ToolTip)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(2)
+        self._lcd = LcdWidget()
+        self._lcd.setFixedSize(128, 80)
+        layout.addWidget(self._lcd)
+        self._tick_label = QLabel("")
+        self._tick_label.setStyleSheet("font-size: 10px; color: #666;")
+        layout.addWidget(self._tick_label)
+        self.setFixedSize(136, 100)
+
+    def update_frame(self, tick, frame_data, min_tick=0):
+        if frame_data is not None:
+            self._lcd.set_frame(frame_data)
+            emu_time = (tick - min_tick) / TICK_FREQUENCY
+            self._tick_label.setText(f"Tick {tick:,} ({emu_time:.1f}s)")
+        else:
+            self._lcd.set_frame(None)
+            self._tick_label.setText("No LCD data")
 
 
 # ===========================================================================
@@ -166,10 +203,11 @@ class MemoryGridWidget(QWidget):
     32 nibbles per row. Default range 0x020-0x09F (4 rows of 32).
     """
 
-    DEFAULT_START = 0x020
+    DEFAULT_START = 0x000
     COLS = 32
-    DEFAULT_ROWS = 4    # 4 rows of 32 nibbles = 128 nibbles (0x020..0x09F)
+    DEFAULT_ROWS = 20   # Start fully expanded (all 640 nibbles)
     MAX_ROWS = 20       # 640 nibbles / 32 per row
+    COMPACT_ROWS = 4    # Compact view: 4 rows at 0x020
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -182,12 +220,16 @@ class MemoryGridWidget(QWidget):
         self._cell_w = 16
         self._cell_h = 16
         self._addr_w = 48
+        self._selected_addrs: set[int] = set()
+        self._drag_start_addr: int | None = None
+        self._dragging = False
         self._update_size()
         self.setMouseTracking(True)
+        self.setStyleSheet("QToolTip { background-color: white; color: black; border: 1px solid #999; padding: 4px; }")
 
     def _update_size(self):
-        # header + data rows + diff summary + legend (2 lines)
-        total_h = self._cell_h * (self._num_rows + 1) + 20 + 36
+        # header + data rows + legend (2 lines)
+        total_h = self._cell_h * (self._num_rows + 1) + 4 + 36
         total_w = self._addr_w + self.COLS * self._cell_w + 8
         self.setMinimumSize(total_w, total_h)
         self.setFixedHeight(total_h)
@@ -213,8 +255,8 @@ class MemoryGridWidget(QWidget):
         self.set_visible_rows(self.MAX_ROWS)
 
     def show_default(self):
-        self._start_addr = self.DEFAULT_START
-        self.set_visible_rows(self.DEFAULT_ROWS)
+        self._start_addr = 0x020
+        self.set_visible_rows(self.COMPACT_ROWS)
 
     @property
     def visible_rows(self):
@@ -237,7 +279,53 @@ class MemoryGridWidget(QWidget):
                 return addr
         return None
 
+    def selected_addresses(self) -> set[int]:
+        """Return the current set of selected nibble addresses."""
+        return set(self._selected_addrs)
+
+    def clear_selection(self):
+        """Clear all selected addresses."""
+        self._selected_addrs.clear()
+        self.update()
+
+    def _addr_range(self, a, b):
+        """Return set of addresses in rectangular region between addr a and b."""
+        if a is None or b is None:
+            return set()
+        row_a, col_a = divmod(a - self._start_addr, self.COLS)
+        row_b, col_b = divmod(b - self._start_addr, self.COLS)
+        r0, r1 = sorted((row_a, row_b))
+        c0, c1 = sorted((col_a, col_b))
+        result = set()
+        for r in range(r0, r1 + 1):
+            for c in range(c0, c1 + 1):
+                addr = self._start_addr + r * self.COLS + c
+                if 0 <= addr < 640:
+                    result.add(addr)
+        return result
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            addr = self._addr_at_pos(int(event.position().x()), int(event.position().y()))
+            self._drag_start_addr = addr
+            self._dragging = False
+            if addr is not None:
+                # Every click toggles the address
+                if addr in self._selected_addrs:
+                    self._selected_addrs.discard(addr)
+                else:
+                    self._selected_addrs.add(addr)
+                self.update()
+
     def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.MouseButton.LeftButton and self._drag_start_addr is not None:
+            addr = self._addr_at_pos(int(event.position().x()), int(event.position().y()))
+            if addr is not None and addr != self._drag_start_addr:
+                self._dragging = True
+                self._selected_addrs = self._addr_range(self._drag_start_addr, addr)
+                self.update()
+            return
+
         addr = self._addr_at_pos(int(event.position().x()), int(event.position().y()))
         if addr is not None:
             nibble_val = self._read_nibble(addr)
@@ -253,6 +341,11 @@ class MemoryGridWidget(QWidget):
             QToolTip.showText(event.globalPosition().toPoint(), tip, self)
         else:
             QToolTip.hideText()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start_addr = None
+            self._dragging = False
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -310,32 +403,17 @@ class MemoryGridWidget(QWidget):
                     painter.setPen(QPen(QColor(120, 30, 30), 1))
                     painter.drawRect(x, y, self._cell_w - 2, self._cell_h - 2)
 
+                # Selection border
+                if addr in self._selected_addrs:
+                    painter.setPen(QPen(QColor(0, 220, 255), 2))
+                    painter.drawRect(x, y, self._cell_w - 2, self._cell_h - 2)
+
                 painter.setPen(text_color)
                 painter.drawText(x, y, self._cell_w, self._cell_h,
                                  Qt.AlignmentFlag.AlignCenter, f"{nibble_val:X}")
 
-        # Diff summary line
-        y_diff = (self._num_rows + 1) * self._cell_h + 2
-        if self._diff:
-            parts = []
-            for addr in sorted(self._diff.keys())[:8]:
-                old_v, new_v = self._diff[addr]
-                field_info = ADDR_COLOR_MAP.get(addr)
-                if field_info:
-                    parts.append(f"0x{addr:03X}/{field_info[0]} ({old_v:X}\u2192{new_v:X})")
-                else:
-                    parts.append(f"0x{addr:03X} ({old_v:X}\u2192{new_v:X})")
-            summary = f"{len(self._diff)} changed: {', '.join(parts)}"
-            if len(self._diff) > 8:
-                summary += f" +{len(self._diff) - 8} more"
-            painter.setPen(QColor(255, 215, 0))
-            painter.drawText(4, y_diff, self.width() - 8, self._cell_h,
-                             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                             summary)
-        y_diff += self._cell_h + 2
-
         # Legend
-        y_legend = y_diff
+        y_legend = (self._num_rows + 1) * self._cell_h + 4
         lx = 4
         known_fields = [n for n, cfg in memory_config.MAP.items() if cfg.get("addr") is not None]
         for name in known_fields:
@@ -370,6 +448,9 @@ class TimelineWidget(QWidget):
         self.markers = []
         self.current_tick = 0
         self._on_tick_clicked = None
+        self._stream = None
+        self._lcd_popup = None
+        self._last_popup_tick = None
 
     def set_range(self, min_tick, max_tick):
         self.min_tick = min_tick
@@ -406,6 +487,23 @@ class TimelineWidget(QWidget):
             f"Tick: {tick:,}\nTime: {emu_time:.2f}s",
             self,
         )
+        # LCD popup
+        if self._stream and self._lcd_popup:
+            if self._last_popup_tick is None or abs(tick - self._last_popup_tick) > 500:
+                frame = self._stream.nearest_lcd_frame(tick)
+                if frame:
+                    self._lcd_popup.update_frame(frame[0], frame[1], self.min_tick)
+                else:
+                    self._lcd_popup.update_frame(tick, None, self.min_tick)
+                self._last_popup_tick = tick
+            gpos = event.globalPosition().toPoint()
+            self._lcd_popup.move(gpos.x() + 10, gpos.y() - self._lcd_popup.height() - 5)
+            self._lcd_popup.show()
+
+    def leaveEvent(self, event):
+        if self._lcd_popup:
+            self._lcd_popup.hide()
+            self._last_popup_tick = None
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -418,29 +516,48 @@ class TimelineWidget(QWidget):
             painter.end()
             return
 
+        # Draw markers in priority order: buttons (subtle) first, then annotations/bookmarks on top
+        button_markers = []
+        other_markers = []
         for marker in self.markers:
+            style = marker[3] if len(marker) > 3 else "line"
+            if style in ("triangle_up", "triangle_down"):
+                button_markers.append(marker)
+            else:
+                other_markers.append(marker)
+
+        # Button events: small ticks at bottom/top edges, semi-transparent
+        for tick, color, label, style in button_markers:
+            x = int((tick - self.min_tick) / span * w)
+            muted = QColor(color.red(), color.green(), color.blue(), 100)
+            painter.setPen(QPen(muted, 1))
+            if style == "triangle_up":
+                painter.drawLine(x, h, x, h - 5)
+            else:
+                painter.drawLine(x, 0, x, 5)
+
+        # Annotations and bookmarks: full-height prominent lines
+        for marker in other_markers:
             tick = marker[0]
             color = marker[1]
             style = marker[3] if len(marker) > 3 else "line"
             x = int((tick - self.min_tick) / span * w)
-
-            if style == "triangle_up":
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(color)
-                painter.drawPolygon([QPoint(x - 3, h), QPoint(x + 3, h), QPoint(x, h - 8)])
-            elif style == "triangle_down":
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(color)
-                painter.drawPolygon([QPoint(x - 3, 0), QPoint(x + 3, 0), QPoint(x, 8)])
-            else:
-                line_h = h if style == "tall_line" else h // 2
-                painter.setPen(QPen(color, 1 if style != "tall_line" else 2))
-                painter.drawLine(x, h - line_h, x, h)
+            line_h = h if style == "tall_line" else h // 2
+            painter.setPen(QPen(color, 1 if style != "tall_line" else 2))
+            painter.drawLine(x, h - line_h, x, h)
 
         # Current position
         cx = int((self.current_tick - self.min_tick) / span * w)
         painter.setPen(QPen(QColor(255, 255, 0), 2))
         painter.drawLine(cx, 0, cx, h)
+
+        # Legend at right edge
+        font = QFont("Consolas", 7)
+        font.setStyleHint(QFont.StyleHint.Monospace)
+        painter.setFont(font)
+        painter.setPen(QColor(120, 120, 120))
+        painter.drawText(4, 2, w - 8, 12, Qt.AlignmentFlag.AlignLeft,
+                         "Timeline — yellow: cursor | pink: bookmarks | red: annotations | green: buttons")
 
         painter.end()
 
@@ -458,22 +575,30 @@ class HelpOverlay(QWidget):
   Navigation
     Left / Right         Step +/-1 write
     Shift+Left / Right   Step +/-10 writes
-    Ctrl+Left / Right    Step +/-1 emu-second
+    Ctrl+Left / Right    Cycle bookmarks (or +/-1s)
+    [ / ]                Prev / Next screen change
     Home / End           Jump to start / end
     Space                Play / Pause auto-step
 
   Tools
     A                    Annotate current tick
+    B                    Toggle bookmark
     L                    Launch sim here
+    T                    Open in TamaTool
     ? / F1               Toggle this help
+    Escape               Clear hex grid selection
 
   Memory Grid
     M                    Toggle expand / collapse
     + / =                Show one more row
     - / _                Show one fewer row
+    Alt+Left / Right     Prev/Next write to selected addrs
 
-  Hex Grid Hover
-    Hover any nibble for address, field name, value
+  Hex Grid
+    Click                Select address
+    Ctrl+Click           Toggle address in selection
+    Drag                 Select rectangular region
+    Hover                Show address, field name, value
     Red-bordered cells = danger zone (CPU stack)
 
               Press ? to close"""
@@ -543,6 +668,17 @@ class NavigationBar(QWidget):
         self.btn_end = QPushButton(">|")
         self.btn_play = QPushButton("Play")
 
+        self.btn_home.setToolTip("Jump to start  [Home]")
+        self.btn_back_1s.setToolTip("Back 1 second  [Ctrl+Left]")
+        self.btn_back_10.setToolTip("Back 10 writes  [Shift+Left]")
+        self.btn_back_1.setToolTip("Back 1 write  [Left]")
+        self.btn_fwd_1.setToolTip("Forward 1 write  [Right]")
+        self.btn_fwd_10.setToolTip("Forward 10 writes  [Shift+Right]")
+        self.btn_fwd_1s.setToolTip("Forward 1 second  [Ctrl+Right]")
+        self.btn_end.setToolTip("Jump to end  [End]")
+        self.btn_play.setToolTip("Play / Pause auto-step  [Space]")
+        self.slider.setToolTip("Scrub through tick markers")
+
         for btn in [self.btn_home, self.btn_back_1s, self.btn_back_10, self.btn_back_1]:
             btn.setFixedWidth(36)
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -556,6 +692,36 @@ class NavigationBar(QWidget):
         self.btn_play.setFixedWidth(50)
         self.btn_play.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         btn_row.addWidget(self.btn_play)
+
+        self.btn_prev_lcd = QPushButton("|<LCD")
+        self.btn_next_lcd = QPushButton("LCD>|")
+        self.btn_prev_lcd.setToolTip("Previous LCD screen change  [[]")
+        self.btn_next_lcd.setToolTip("Next LCD screen change  []]")
+        for btn in [self.btn_prev_lcd, self.btn_next_lcd]:
+            btn.setFixedWidth(50)
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            btn_row.addWidget(btn)
+
+        self.btn_prev_sel = QPushButton("<Sel")
+        self.btn_next_sel = QPushButton("Sel>")
+        self.btn_prev_sel.setToolTip("Previous write to selected address(es)  [Alt+Left]")
+        self.btn_next_sel.setToolTip("Next write to selected address(es)  [Alt+Right]")
+        for btn in [self.btn_prev_sel, self.btn_next_sel]:
+            btn.setFixedWidth(42)
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            btn_row.addWidget(btn)
+
+        self.btn_add_bookmark = QPushButton("+Bk")
+        self.btn_prev_bookmark = QPushButton("<Bk")
+        self.btn_next_bookmark = QPushButton("Bk>")
+        self.btn_add_bookmark.setToolTip("Add/remove bookmark at current tick  [B]")
+        self.btn_prev_bookmark.setToolTip("Previous bookmark  [Ctrl+Left]")
+        self.btn_next_bookmark.setToolTip("Next bookmark  [Ctrl+Right]")
+        for btn in [self.btn_add_bookmark, self.btn_prev_bookmark, self.btn_next_bookmark]:
+            btn.setFixedWidth(36)
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            btn_row.addWidget(btn)
+
         layout.addLayout(btn_row)
 
         self.status_label = QLabel("Tick: 0 | Time: 0.0s | Step: 0 of 0")
@@ -603,6 +769,12 @@ class StreamViewer(QMainWindow):
         stream_progress(50, "Building write index...")
         self.tracker = CachedStateTracker(self.stream, progress_callback=stream_progress)
         self.annotation_store = AnnotationStore(filepath)
+        self.bookmark_store = BookmarkStore(filepath)
+
+        # Tick marking state
+        self._marked_ticks = self.bookmark_store.ticks  # sorted list, loaded from disk
+        self._mark_cursor = -1    # cycling index
+        self._bookmark_ram_cache = {}  # tick -> bytes(320) RAM snapshot
 
         self.min_tick, self.max_tick = self.stream.tick_range
         if self.min_tick is None:
@@ -634,6 +806,14 @@ class StreamViewer(QMainWindow):
         self.tracker.seek(self.min_tick)
         self._update_display()
 
+        # Pre-populate RAM cache for bookmarks loaded from disk
+        if self._marked_ticks:
+            stream_progress(98, f"Caching {len(self._marked_ticks)} bookmarks...")
+            for tick in self._marked_ticks:
+                self.tracker.seek(tick)
+                self._bookmark_ram_cache[tick] = self.tracker.ram
+            self.tracker.seek(self.min_tick)
+
         if progress:
             progress.close()
 
@@ -650,10 +830,12 @@ class StreamViewer(QMainWindow):
                  style))
 
     def _get_all_markers(self):
-        """Combine in-stream markers + sidecar annotation markers."""
+        """Combine in-stream markers + sidecar annotation markers + bookmarks."""
         markers = list(self.annotation_markers) + list(self.button_markers)
         for ann in self.annotation_store.all():
             markers.append((ann["tick"], QColor(100, 150, 255), ann["text"], "tall_line"))
+        for tick in self._marked_ticks:
+            markers.append((tick, QColor(255, 0, 255), "Bookmark", "tall_line"))
         return markers
 
     def _init_ui(self):
@@ -704,8 +886,15 @@ class StreamViewer(QMainWindow):
 
         self.launch_btn = QPushButton("Launch Sim Here (L)")
         self.launch_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.launch_btn.setToolTip("Launch PC simulator at current tick  [L]")
         self.launch_btn.clicked.connect(self._launch_sim)
         left_layout.addWidget(self.launch_btn)
+
+        self.tamatool_btn = QPushButton("Open in TamaTool (T)")
+        self.tamatool_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.tamatool_btn.setToolTip("Load current memory state into TamaTool live editor  [T]")
+        self.tamatool_btn.clicked.connect(self._launch_tamatool)
+        left_layout.addWidget(self.tamatool_btn)
 
         scroll = QScrollArea()
         scroll.setWidget(left_widget)
@@ -727,6 +916,13 @@ class StreamViewer(QMainWindow):
         hex_label.setStyleSheet("color: #ccc; font-weight: bold;")
         hex_header.addWidget(hex_label)
         hex_header.addStretch()
+        white_btn_style = "background-color: white; color: black; border: 1px solid #999; padding: 2px 6px;"
+        hex_btn_tooltips = {
+            "+ Row": "Show one more row of memory  [+/=]",
+            "- Row": "Show one fewer row of memory  [-/_]",
+            "Show all": "Show all 640 nibbles  [M]",
+            "Default": "Show compact 4-row view  [M]",
+        }
         for text, handler in [("+ Row", self._hex_expand),
                               ("- Row", self._hex_collapse),
                               ("Show all", self._hex_show_all),
@@ -734,12 +930,41 @@ class StreamViewer(QMainWindow):
             btn = QPushButton(text)
             btn.setFixedWidth(60)
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            btn.setStyleSheet(white_btn_style)
+            btn.setToolTip(hex_btn_tooltips[text])
             btn.clicked.connect(handler)
             hex_header.addWidget(btn)
+        self.btn_clear_selection = QPushButton("Clear Sel")
+        self.btn_clear_selection.setFixedWidth(70)
+        self.btn_clear_selection.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_clear_selection.setStyleSheet(white_btn_style)
+        self.btn_clear_selection.setToolTip("Clear all selected addresses  [Escape]")
+        self.btn_clear_selection.clicked.connect(self._hex_clear_selection)
+        hex_header.addWidget(self.btn_clear_selection)
         center_layout.addLayout(hex_header)
 
+        # Hex grid + diff column side by side
+        hex_row = QHBoxLayout()
         self.hex_grid = MemoryGridWidget()
-        center_layout.addWidget(self.hex_grid)
+        hex_row.addWidget(self.hex_grid)
+
+        # Diff column (right side, scrollable vertical list of changed addresses)
+        self.diff_column = QLabel("")
+        self.diff_column.setWordWrap(False)
+        self.diff_column.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.diff_column.setStyleSheet(
+            "color: #ffd700; font-family: Consolas; font-size: 11px; "
+            "background-color: #1e1e1e; padding: 4px;"
+        )
+        diff_scroll = QScrollArea()
+        diff_scroll.setWidget(self.diff_column)
+        diff_scroll.setWidgetResizable(True)
+        diff_scroll.setMinimumWidth(190)
+        diff_scroll.setMaximumWidth(260)
+        diff_scroll.setStyleSheet("QScrollArea { background-color: #1e1e1e; border: none; }")
+        hex_row.addWidget(diff_scroll)
+
+        center_layout.addLayout(hex_row)
         center_layout.addStretch()
 
         splitter.addWidget(center_widget)
@@ -763,6 +988,9 @@ class StreamViewer(QMainWindow):
         self.timeline_widget.set_range(self.min_tick, self.max_tick)
         self.timeline_widget.set_markers(self._get_all_markers())
         self.timeline_widget.set_click_callback(self._on_timeline_click)
+        self._lcd_popup = LcdPopupWidget()
+        self.timeline_widget._stream = self.stream
+        self.timeline_widget._lcd_popup = self._lcd_popup
         main_layout.addWidget(self.timeline_widget)
 
         # --- Navigation bar ---
@@ -780,6 +1008,13 @@ class StreamViewer(QMainWindow):
         self.nav_bar.btn_back_1s.clicked.connect(lambda: self._nav_step_time(-1))
         self.nav_bar.btn_fwd_1s.clicked.connect(lambda: self._nav_step_time(1))
         self.nav_bar.btn_play.clicked.connect(self._toggle_play)
+        self.nav_bar.btn_prev_lcd.clicked.connect(self._nav_prev_lcd_change)
+        self.nav_bar.btn_next_lcd.clicked.connect(self._nav_next_lcd_change)
+        self.nav_bar.btn_prev_sel.clicked.connect(self._nav_prev_selected_change)
+        self.nav_bar.btn_next_sel.clicked.connect(self._nav_next_selected_change)
+        self.nav_bar.btn_add_bookmark.clicked.connect(self._toggle_mark)
+        self.nav_bar.btn_prev_bookmark.clicked.connect(lambda: self._cycle_marks(-1))
+        self.nav_bar.btn_next_bookmark.clicked.connect(lambda: self._cycle_marks(1))
 
         main_layout.addWidget(self.nav_bar)
 
@@ -821,6 +1056,56 @@ class StreamViewer(QMainWindow):
         self.tracker.seek(self.max_tick)
         self.current_tick = self.max_tick
         self._update_display()
+
+    def _nav_prev_lcd_change(self):
+        self._stop_play()
+        tick = self.stream.prev_lcd_change(self.current_tick)
+        if tick is not None:
+            ram_before = self.tracker.ram
+            self.tracker.seek(tick)
+            self.current_tick = tick
+            custom_diff = self._compute_ram_diff(ram_before, self.tracker.ram)
+            self._update_display(custom_diff=custom_diff)
+
+    def _nav_next_lcd_change(self):
+        self._stop_play()
+        tick = self.stream.next_lcd_change(self.current_tick)
+        if tick is not None:
+            ram_before = self.tracker.ram
+            self.tracker.seek(tick)
+            self.current_tick = tick
+            custom_diff = self._compute_ram_diff(ram_before, self.tracker.ram)
+            self._update_display(custom_diff=custom_diff)
+
+    def _nav_prev_selected_change(self):
+        """Jump to previous write affecting any selected address."""
+        self._stop_play()
+        addrs = self.hex_grid.selected_addresses()
+        if not addrs:
+            self.nav_bar.status_label.setText("No addresses selected — click hex grid cells first")
+            return
+        tick = self.tracker.prev_write_to_addrs(addrs)
+        if tick is not None:
+            ram_before = self.tracker.ram
+            self.tracker.seek(tick)
+            self.current_tick = tick
+            custom_diff = self._compute_ram_diff(ram_before, self.tracker.ram)
+            self._update_display(custom_diff=custom_diff)
+
+    def _nav_next_selected_change(self):
+        """Jump to next write affecting any selected address."""
+        self._stop_play()
+        addrs = self.hex_grid.selected_addresses()
+        if not addrs:
+            self.nav_bar.status_label.setText("No addresses selected — click hex grid cells first")
+            return
+        tick = self.tracker.next_write_to_addrs(addrs)
+        if tick is not None:
+            ram_before = self.tracker.ram
+            self.tracker.seek(tick)
+            self.current_tick = tick
+            custom_diff = self._compute_ram_diff(ram_before, self.tracker.ram)
+            self._update_display(custom_diff=custom_diff)
 
     def _on_slider_changed(self, index):
         if 0 <= index < len(self._tick_positions):
@@ -872,6 +1157,9 @@ class StreamViewer(QMainWindow):
     def _hex_show_default(self):
         self.hex_grid.show_default()
 
+    def _hex_clear_selection(self):
+        self.hex_grid.clear_selection()
+
     # --- Annotation ---
 
     def _save_annotation(self):
@@ -898,7 +1186,7 @@ class StreamViewer(QMainWindow):
 
     # --- Display update ---
 
-    def _update_display(self):
+    def _update_display(self, custom_diff=None):
         self.tick_label.setText(f"Tick: {self.current_tick:,}")
         emu_time = (self.current_tick - self.min_tick) / TICK_FREQUENCY
         self.time_label.setText(f"Time: {emu_time:.1f}s")
@@ -929,7 +1217,22 @@ class StreamViewer(QMainWindow):
                 lbl.setText(f"Error: {e}")
 
         # Hex grid with diff
-        self.hex_grid.set_state(ram, self.tracker.last_diff)
+        diff = custom_diff if custom_diff is not None else self.tracker.last_diff
+        self.hex_grid.set_state(ram, diff)
+
+        # Diff column (vertical list, one per line)
+        if diff:
+            lines = []
+            for addr in sorted(diff.keys()):
+                old_v, new_v = diff[addr]
+                field_info = ADDR_COLOR_MAP.get(addr)
+                if field_info:
+                    lines.append(f"0x{addr:03X} {field_info[0]}  {old_v:X}\u2192{new_v:X}")
+                else:
+                    lines.append(f"0x{addr:03X}  {old_v:X}\u2192{new_v:X}")
+            self.diff_column.setText(f"{len(diff)} changed:\n" + "\n".join(lines))
+        else:
+            self.diff_column.setText("")
 
         # LCD (indexed lookup, O(log n))
         frame = self.stream.nearest_lcd_frame(self.current_tick)
@@ -947,10 +1250,173 @@ class StreamViewer(QMainWindow):
 
         self._update_annotation_list()
 
+    @staticmethod
+    def _compute_ram_diff(ram_a, ram_b):
+        """Compare two 320-byte RAMs, return {nibble_addr: (old_val, new_val)} for differences."""
+        diff = {}
+        for byte_idx in range(min(len(ram_a), len(ram_b))):
+            if ram_a[byte_idx] != ram_b[byte_idx]:
+                # High nibble (even address)
+                addr_hi = byte_idx * 2
+                old_hi = (ram_a[byte_idx] & 0xF0) >> 4
+                new_hi = (ram_b[byte_idx] & 0xF0) >> 4
+                if old_hi != new_hi:
+                    diff[addr_hi] = (old_hi, new_hi)
+                # Low nibble (odd address)
+                addr_lo = byte_idx * 2 + 1
+                old_lo = ram_a[byte_idx] & 0x0F
+                new_lo = ram_b[byte_idx] & 0x0F
+                if old_lo != new_lo:
+                    diff[addr_lo] = (old_lo, new_lo)
+        return diff
+
+    def _toggle_mark(self):
+        """Toggle a bookmark at the current tick."""
+        tick = self.current_tick
+        now_bookmarked = self.bookmark_store.toggle(tick)
+        if now_bookmarked:
+            bisect.insort(self._marked_ticks, tick)
+            # Cache RAM at this tick
+            self._bookmark_ram_cache[tick] = self.tracker.ram
+        else:
+            idx = bisect.bisect_left(self._marked_ticks, tick)
+            if idx < len(self._marked_ticks) and self._marked_ticks[idx] == tick:
+                self._marked_ticks.pop(idx)
+            self._bookmark_ram_cache.pop(tick, None)
+            # Adjust cursor
+            if self._mark_cursor >= len(self._marked_ticks):
+                self._mark_cursor = len(self._marked_ticks) - 1
+        self._refresh_markers()
+
+    def _refresh_markers(self):
+        """Rebuild timeline markers including bookmarks."""
+        self.timeline_widget.set_markers(self._get_all_markers())
+
+    def _cycle_marks(self, direction):
+        """Cycle through bookmarks. direction: +1 or -1."""
+        if not self._marked_ticks:
+            # Fall back to ±1 second
+            self._nav_step_time(direction)
+            return
+
+        self._stop_play()
+        ram_before = self.tracker.ram
+
+        self._mark_cursor += direction
+        # Wrap
+        if self._mark_cursor >= len(self._marked_ticks):
+            self._mark_cursor = 0
+        elif self._mark_cursor < 0:
+            self._mark_cursor = len(self._marked_ticks) - 1
+
+        target_tick = self._marked_ticks[self._mark_cursor]
+
+        # Use cached RAM if available (instant), otherwise seek (slow)
+        if target_tick in self._bookmark_ram_cache:
+            self.tracker._ram = bytearray(self._bookmark_ram_cache[target_tick])
+            self.tracker._current_tick = target_tick
+            # Sync write cursor via binary search
+            import bisect as _bisect
+            self.tracker._write_cursor = _bisect.bisect_right(
+                self.tracker._write_ticks, target_tick)
+            self.tracker._last_diff = {}
+        else:
+            self.tracker.seek(target_tick)
+            # Cache it now for next time
+            self._bookmark_ram_cache[target_tick] = self.tracker.ram
+
+        self.current_tick = target_tick
+        ram_after = self.tracker.ram
+        custom_diff = self._compute_ram_diff(ram_before, ram_after)
+        self._update_display(custom_diff=custom_diff)
+
+    @staticmethod
+    def _build_savestate_bytes(ram_320, tick):
+        """Build a 385-byte savestate: 1 byte magic + 64 bytes cpu_state_t + 320 bytes RAM."""
+        magic = b'\x12'
+        # cpu_state_t is 64 bytes, mostly zeros
+        # Offset 12: tick_counter (uint32)
+        # Offset 16: clk_timer_timestamp (uint32)
+        # Offset 20: prog_timer_timestamp (uint32)
+        cpu_state = bytearray(64)
+        struct.pack_into("<I", cpu_state, 12, tick)
+        struct.pack_into("<I", cpu_state, 16, tick)
+        struct.pack_into("<I", cpu_state, 20, tick)
+        return magic + bytes(cpu_state) + bytes(ram_320)
+
     def _launch_sim(self):
-        QMessageBox.information(self, "Not Yet Implemented",
-                                "Launch Sim Here requires savestate binary layout knowledge.\n"
-                                "This feature will be implemented in a future ticket.")
+        ram = self.tracker.ram
+        tick = self.current_tick
+        savestate = self._build_savestate_bytes(ram, tick)
+
+        # Find the exe relative to project root
+        project_root = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
+        exe_path = os.path.join(project_root, "pc", "build", "tamagotchi_pc.exe")
+        if not os.path.exists(exe_path):
+            QMessageBox.warning(self, "Sim Not Found",
+                                f"Could not find:\n{exe_path}\n\nBuild the PC simulator first.")
+            return
+
+        try:
+            tmp = tempfile.NamedTemporaryFile(suffix=".bin", delete=False, prefix="tama_launch_")
+            tmp.write(savestate)
+            tmp.close()
+            subprocess.Popen([exe_path, "--load-state", tmp.name])
+        except Exception as e:
+            QMessageBox.warning(self, "Launch Failed", f"Error launching sim:\n{e}")
+
+    # --- TamaTool integration ---
+
+    _SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "viewer_settings.json")
+
+    def _load_tamatool_path(self):
+        """Return saved TamaTool exe path, or None."""
+        try:
+            import json
+            with open(self._SETTINGS_FILE, "r") as f:
+                return json.load(f).get("tamatool_exe")
+        except Exception:
+            return None
+
+    def _save_tamatool_path(self, path):
+        import json
+        settings = {}
+        try:
+            with open(self._SETTINGS_FILE, "r") as f:
+                settings = json.load(f)
+        except Exception:
+            pass
+        settings["tamatool_exe"] = path
+        with open(self._SETTINGS_FILE, "w") as f:
+            json.dump(settings, f, indent=2)
+
+    def _launch_tamatool(self):
+        """Write raw RAM to a temp file and launch TamaTool with it."""
+        exe_path = self._load_tamatool_path()
+
+        # Locate exe if not saved or missing
+        if not exe_path or not os.path.exists(exe_path):
+            exe_path, _ = QFileDialog.getOpenFileName(
+                self, "Locate TamaTool Executable", "",
+                "Executables (*.exe);;All files (*)"
+            )
+            if not exe_path:
+                return
+            self._save_tamatool_path(exe_path)
+
+        # Write raw 320-byte RAM to temp file
+        ram = self.tracker.ram
+        try:
+            tmp = tempfile.NamedTemporaryFile(
+                suffix=".bin", delete=False, prefix="tama_tt_ram_")
+            tmp.write(ram)
+            tmp.close()
+            subprocess.Popen([exe_path, tmp.name])
+        except Exception as e:
+            QMessageBox.warning(self, "TamaTool Launch Failed",
+                                f"Error launching TamaTool:\n{e}\n\n"
+                                f"Exe: {exe_path}\n"
+                                f"Raw 320-byte RAM written to: {tmp.name}")
 
     # --- Keyboard handling ---
 
@@ -976,16 +1442,24 @@ class StreamViewer(QMainWindow):
             super().keyPressEvent(event)
             return
 
+        if key == Qt.Key.Key_Escape:
+            self.hex_grid.clear_selection()
+            return
+
         if key == Qt.Key.Key_Left:
-            if mods & Qt.KeyboardModifier.ControlModifier:
-                self._nav_step_time(-1)
+            if mods & Qt.KeyboardModifier.AltModifier:
+                self._nav_prev_selected_change()
+            elif mods & Qt.KeyboardModifier.ControlModifier:
+                self._cycle_marks(-1)
             elif mods & Qt.KeyboardModifier.ShiftModifier:
                 self._nav_step(-10)
             else:
                 self._nav_step(-1)
         elif key == Qt.Key.Key_Right:
-            if mods & Qt.KeyboardModifier.ControlModifier:
-                self._nav_step_time(1)
+            if mods & Qt.KeyboardModifier.AltModifier:
+                self._nav_next_selected_change()
+            elif mods & Qt.KeyboardModifier.ControlModifier:
+                self._cycle_marks(1)
             elif mods & Qt.KeyboardModifier.ShiftModifier:
                 self._nav_step(10)
             else:
@@ -1001,15 +1475,23 @@ class StreamViewer(QMainWindow):
             self.annotation_input.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         elif key == Qt.Key.Key_L:
             self._launch_sim()
+        elif key == Qt.Key.Key_T:
+            self._launch_tamatool()
+        elif key == Qt.Key.Key_B:
+            self._toggle_mark()
         elif key == Qt.Key.Key_M:
-            if self.hex_grid.visible_rows == MemoryGridWidget.DEFAULT_ROWS:
-                self.hex_grid.show_all()
-            else:
+            if self.hex_grid.visible_rows == MemoryGridWidget.MAX_ROWS:
                 self.hex_grid.show_default()
+            else:
+                self.hex_grid.show_all()
         elif key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
             self.hex_grid.expand_one()
         elif key in (Qt.Key.Key_Minus, Qt.Key.Key_Underscore):
             self.hex_grid.collapse_one()
+        elif key == Qt.Key.Key_BracketLeft:
+            self._nav_prev_lcd_change()
+        elif key == Qt.Key.Key_BracketRight:
+            self._nav_next_lcd_change()
         else:
             super().keyPressEvent(event)
 
@@ -1030,6 +1512,7 @@ def main():
         sys.exit(1)
 
     app = QApplication(sys.argv)
+    app.setStyleSheet("QToolTip { background-color: white; color: black; border: 1px solid #999; padding: 4px; }")
     viewer = StreamViewer(filepath, app=app)
     viewer.show()
     sys.exit(app.exec())

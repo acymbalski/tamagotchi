@@ -43,14 +43,38 @@
 #define WIN_W         (STATS_W + MARGIN + LCD_DRAW_W + MARGIN)   /* 480 */
 #define WIN_H         320
 
-/* ---- Captures directory (relative to exe in pc/build/) ---- */
-#define CAPTURES_DIR "../../captures"
+/* ---- Captures directory (resolved relative to exe at runtime) ---- */
+static char g_capturesDir[MAX_PATH] = "";
+
+static void init_captures_dir() {
+    char exePath[MAX_PATH];
+    GetModuleFileNameA(NULL, exePath, MAX_PATH);
+    // Strip filename to get directory: "...\pc\build\tamagotchi_pc.exe" -> "...\pc\build\"
+    char *lastSlash = strrchr(exePath, '\\');
+    if (!lastSlash) lastSlash = strrchr(exePath, '/');
+    if (lastSlash) *(lastSlash + 1) = '\0';
+    // Go up two levels: pc/build/ -> project root, then into captures/
+    snprintf(g_capturesDir, MAX_PATH, "%s..\\..\\captures", exePath);
+    // Normalize: collapse the ".." components via GetFullPathNameA
+    char resolved[MAX_PATH];
+    GetFullPathNameA(g_capturesDir, MAX_PATH, resolved, NULL);
+    strncpy(g_capturesDir, resolved, MAX_PATH);
+    g_capturesDir[MAX_PATH - 1] = '\0';
+}
+
+// Convenience macro — use g_capturesDir everywhere instead of a literal
+#define CAPTURES_DIR g_capturesDir
 
 /* ---- Global state ---- */
 static bool_t matrix_buffer[LCD_HEIGHT][LCD_WIDTH / 8] = {{0}};
 static bool_t icon_buffer[ICON_NUM] = {0};
 static uint32_t current_freq = 0;
 static bool isPaused = false;
+
+/* ---- Space-bar hold boost ---- */
+static bool spaceHeld = false;
+static int  savedSpeedIndex = 0;
+static bool savedPaused = false;
 
 static SDL_Window   *window   = nullptr;
 static SDL_Renderer *renderer = nullptr;
@@ -297,8 +321,8 @@ static void take_snapshot() {
     // Ensure captures directory exists
     CreateDirectoryA(CAPTURES_DIR, NULL);
 
-    sprintf(binPath, CAPTURES_DIR "/snap_%llu.bin", ts);
-    sprintf(bmpPath, CAPTURES_DIR "/snap_%llu.bmp", ts);
+    snprintf(binPath, MAX_PATH, "%s\\snap_%llu.bin", CAPTURES_DIR, ts);
+    snprintf(bmpPath, MAX_PATH, "%s\\snap_%llu.bmp", CAPTURES_DIR, ts);
 
     pc_save_state_to_file(&cpuState, binPath);
     save_bmp(bmpPath);
@@ -747,6 +771,18 @@ static int hal_handler(void) {
                 fflush(stdout);
                 break;
 
+            /* Space bar hold: 5x speed boost (works even when paused) */
+            case SDLK_SPACE:
+                if (!spaceHeld) {
+                    spaceHeld = true;
+                    savedSpeedIndex = speedIndex;
+                    savedPaused = isPaused;
+                    speedIndex = 1;  // 10x
+                    set_cpu_speed_ratio(speedValues[speedIndex]);
+                    if (isPaused) isPaused = false;
+                }
+                break;
+
             /* Stream capture toggle */
             case SDLK_t:
 #ifdef STREAM_CAPTURE_ENABLED
@@ -757,10 +793,12 @@ static int hal_handler(void) {
                     printf("[stream] Recording stopped\n");
                 } else {
                     CreateDirectoryA(CAPTURES_DIR, NULL);
-                    CreateDirectoryA(CAPTURES_DIR "/streams", NULL);
+                    char streamsDir[MAX_PATH];
+                    snprintf(streamsDir, MAX_PATH, "%s\\streams", CAPTURES_DIR);
+                    CreateDirectoryA(streamsDir, NULL);
                     cpu_get_state(&cpuState);
                     char streamPath[MAX_PATH];
-                    sprintf(streamPath, CAPTURES_DIR "/streams/stream_%u.tamstream", cpuState.tick_counter);
+                    snprintf(streamPath, MAX_PATH, "%s\\streams\\stream_%u.tamstream", CAPTURES_DIR, cpuState.tick_counter);
                     g_streamCapture = new StreamCapture();
                     g_streamCapture->start(streamPath, cpuState.tick_counter, cpuState.memory);
                     lastStreamSnapshotTick = cpuState.tick_counter;
@@ -779,6 +817,14 @@ static int hal_handler(void) {
 
         case SDL_KEYUP:
             switch (event.key.keysym.sym) {
+            case SDLK_SPACE:
+                if (spaceHeld) {
+                    spaceHeld = false;
+                    speedIndex = savedSpeedIndex;
+                    set_cpu_speed_ratio(speedValues[speedIndex]);
+                    isPaused = savedPaused;
+                }
+                break;
             case SDLK_LEFT:
                 hw_set_button(BTN_LEFT, BTN_STATE_RELEASED);
 #ifdef STREAM_CAPTURE_ENABLED
@@ -904,6 +950,7 @@ static void process_headless_stdin() {
  * ====================================================== */
 int main(int argc, char **argv) {
     QueryPerformanceFrequency(&qpc_freq);
+    init_captures_dir();
 
     /* Parse Arguments */
     for (int i = 1; i < argc; i++) {
@@ -1006,10 +1053,12 @@ int main(int argc, char **argv) {
 #ifdef STREAM_CAPTURE_ENABLED
     if (autoStream) {
         CreateDirectoryA(CAPTURES_DIR, NULL);
-        CreateDirectoryA(CAPTURES_DIR "/streams", NULL);
+        char autoStreamsDir[MAX_PATH];
+        snprintf(autoStreamsDir, MAX_PATH, "%s\\streams", CAPTURES_DIR);
+        CreateDirectoryA(autoStreamsDir, NULL);
         cpu_get_state(&cpuState);
         static char autoStreamPath[MAX_PATH];
-        sprintf(autoStreamPath, CAPTURES_DIR "/streams/stream_%u.tamstream", cpuState.tick_counter);
+        snprintf(autoStreamPath, MAX_PATH, "%s\\streams\\stream_%u.tamstream", CAPTURES_DIR, cpuState.tick_counter);
         g_streamCapture = new StreamCapture();
         g_streamCapture->start(autoStreamPath, cpuState.tick_counter, cpuState.memory);
         lastStreamSnapshotTick = cpuState.tick_counter;

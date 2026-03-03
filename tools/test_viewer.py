@@ -688,17 +688,18 @@ class TestMemoryGridWidget:
         assert ADDR_COLOR_MAP[0x055][0] == "age"
 
     def test_default_visible_range(self):
-        """Default shows 4 rows (32 cols each = 128 nibbles)."""
+        """Default shows 20 rows (fully expanded)."""
         _ensure_qapp()
         from stream_viewer import MemoryGridWidget
         grid = MemoryGridWidget()
-        assert grid.visible_rows == 4
+        assert grid.visible_rows == 20
 
     def test_expand_adds_row(self):
-        """After expand, visible rows increases by 1."""
+        """After collapsing to compact then expanding, visible rows increases by 1."""
         _ensure_qapp()
         from stream_viewer import MemoryGridWidget
         grid = MemoryGridWidget()
+        grid.show_default()  # go to compact (4 rows)
         grid.expand_one()
         assert grid.visible_rows == 5
 
@@ -915,3 +916,526 @@ class TestHelpOverlay:
         assert overlay.isVisible()
         overlay.toggle()
         assert not overlay.isVisible()
+
+
+# ===========================================================================
+# TestLcdPopupWidget (Feature 3)
+# ===========================================================================
+
+class TestLcdPopupWidget:
+    """Tests for the LCD popup widget."""
+
+    def test_update_frame_with_data(self):
+        """Popup accepts frame data and updates label."""
+        _ensure_qapp()
+        from stream_viewer import LcdPopupWidget
+        popup = LcdPopupWidget()
+        frame = bytearray(72)
+        frame[0] = 0x80  # a pixel
+        popup.update_frame(5000, bytes(frame), min_tick=1000)
+        assert "5,000" in popup._tick_label.text()
+
+    def test_update_frame_with_none(self):
+        """Popup handles None frame data gracefully."""
+        _ensure_qapp()
+        from stream_viewer import LcdPopupWidget
+        popup = LcdPopupWidget()
+        popup.update_frame(5000, None, min_tick=0)
+        assert "No LCD data" in popup._tick_label.text()
+
+
+# ===========================================================================
+# TestBuildSavestateBytes (Feature 4)
+# ===========================================================================
+
+class TestBuildSavestateBytes:
+    """Tests for savestate construction."""
+
+    def test_savestate_size(self):
+        """Savestate is exactly 385 bytes (1 + 64 + 320)."""
+        from stream_viewer import StreamViewer
+        ram = bytes(320)
+        result = StreamViewer._build_savestate_bytes(ram, 100000)
+        assert len(result) == 385
+
+    def test_savestate_magic(self):
+        """First byte is 0x12."""
+        from stream_viewer import StreamViewer
+        ram = bytes(320)
+        result = StreamViewer._build_savestate_bytes(ram, 100000)
+        assert result[0] == 0x12
+
+    def test_savestate_tick_fields(self):
+        """tick_counter, clk_timer, prog_timer all set to the given tick."""
+        import struct
+        from stream_viewer import StreamViewer
+        ram = bytes(320)
+        tick = 123456
+        result = StreamViewer._build_savestate_bytes(ram, tick)
+        # cpu_state starts at byte 1, tick_counter at offset 12
+        assert struct.unpack_from("<I", result, 1 + 12)[0] == tick
+        assert struct.unpack_from("<I", result, 1 + 16)[0] == tick
+        assert struct.unpack_from("<I", result, 1 + 20)[0] == tick
+
+    def test_savestate_ram_preserved(self):
+        """RAM bytes are preserved in the savestate."""
+        from stream_viewer import StreamViewer
+        ram = bytearray(320)
+        ram[0] = 0xAB
+        ram[100] = 0xCD
+        ram[319] = 0xEF
+        result = StreamViewer._build_savestate_bytes(bytes(ram), 0)
+        # RAM starts at byte 65 (1 + 64)
+        assert result[65] == 0xAB
+        assert result[165] == 0xCD
+        assert result[384] == 0xEF
+
+
+# ===========================================================================
+# TestLcdChangeNavigation (Feature 5)
+# ===========================================================================
+
+class TestLcdChangeNavigation:
+    """Tests for LCD screen change detection and navigation."""
+
+    def _make_lcd_change_stream(self, tmp_path):
+        """Build a v2 stream with multiple LCD frames, some identical, some different."""
+        frame_a = bytearray(72)
+        frame_a[0] = 0x80  # pixel on
+        frame_b = bytearray(72)
+        frame_b[0] = 0x40  # different pixel
+        frame_c = bytearray(72)
+        frame_c[0] = 0x40  # same as B
+
+        records = [
+            {"type": REC_RAM_SNAPSHOT, "tick": 1000, "memory": bytes(RAM_BYTES)},
+            {"type": REC_LCD_FRAME, "tick": 1000, "display": bytes(frame_a)},
+            {"type": REC_LCD_FRAME, "tick": 2000, "display": bytes(frame_b)},   # changed
+            {"type": REC_LCD_FRAME, "tick": 3000, "display": bytes(frame_c)},   # same as B
+            {"type": REC_LCD_FRAME, "tick": 4000, "display": bytes(frame_a)},   # changed back
+        ]
+        data = make_tamstream_bytes(1000, records, version=2)
+        fpath = _write_tamstream_to_file(data, tmp_path, "lcd_change_test.tamstream")
+        return TamStream(fpath)
+
+    def test_lcd_change_ticks_built(self, tmp_path):
+        """_lcd_change_ticks is populated with ticks where display changed."""
+        ts = self._make_lcd_change_stream(tmp_path)
+        # frame_a -> frame_b at 2000 (change), frame_b -> frame_c at 3000 (same), frame_c -> frame_a at 4000 (change)
+        assert ts._lcd_change_ticks == [2000, 4000]
+        ts.close()
+
+    def test_next_lcd_change(self, tmp_path):
+        """next_lcd_change returns the next change tick."""
+        ts = self._make_lcd_change_stream(tmp_path)
+        assert ts.next_lcd_change(1000) == 2000
+        assert ts.next_lcd_change(2000) == 4000
+        assert ts.next_lcd_change(2500) == 4000
+        assert ts.next_lcd_change(4000) is None
+        ts.close()
+
+    def test_prev_lcd_change(self, tmp_path):
+        """prev_lcd_change returns the previous change tick."""
+        ts = self._make_lcd_change_stream(tmp_path)
+        assert ts.prev_lcd_change(5000) == 4000
+        assert ts.prev_lcd_change(4000) == 2000
+        assert ts.prev_lcd_change(3000) == 2000
+        assert ts.prev_lcd_change(2000) is None
+        ts.close()
+
+    def test_next_lcd_change_skips_identical(self, tmp_path):
+        """Identical adjacent frames (B->C) do NOT produce a change tick."""
+        ts = self._make_lcd_change_stream(tmp_path)
+        # At tick 2500, next change should be 4000, not 3000
+        assert ts.next_lcd_change(2500) == 4000
+        ts.close()
+
+
+# ===========================================================================
+# TestComputeRamDiff (Feature 6)
+# ===========================================================================
+
+class TestComputeRamDiff:
+    """Tests for cross-mark RAM diff computation."""
+
+    def test_identical_rams(self):
+        """Identical RAMs produce empty diff."""
+        from stream_viewer import StreamViewer
+        ram = bytes(320)
+        assert StreamViewer._compute_ram_diff(ram, ram) == {}
+
+    def test_single_nibble_diff(self):
+        """Single nibble change detected correctly."""
+        from stream_viewer import StreamViewer
+        ram_a = bytearray(320)
+        ram_b = bytearray(320)
+        # Change upper nibble of byte 0x20 (addr 0x040)
+        ram_b[0x20] = 0xA0
+        diff = StreamViewer._compute_ram_diff(bytes(ram_a), bytes(ram_b))
+        assert diff == {0x040: (0, 0xA)}
+
+    def test_both_nibbles_in_byte(self):
+        """Both nibbles in same byte can differ independently."""
+        from stream_viewer import StreamViewer
+        ram_a = bytearray(320)
+        ram_b = bytearray(320)
+        ram_a[0x20] = 0x35
+        ram_b[0x20] = 0xA7
+        diff = StreamViewer._compute_ram_diff(bytes(ram_a), bytes(ram_b))
+        assert diff == {0x040: (3, 0xA), 0x041: (5, 7)}
+
+
+# ===========================================================================
+# TestTickMarking (Feature 6)
+# ===========================================================================
+
+class TestTickMarking:
+    """Tests for bookmark toggling and cycling logic."""
+
+    def test_mark_toggle_add_remove(self):
+        """Adding then removing a mark works correctly."""
+        import bisect
+        marks = []
+        tick = 5000
+
+        # Add
+        bisect.insort(marks, tick)
+        assert marks == [5000]
+
+        # Remove
+        idx = bisect.bisect_left(marks, tick)
+        if idx < len(marks) and marks[idx] == tick:
+            marks.pop(idx)
+        assert marks == []
+
+    def test_mark_cycling_wraps(self):
+        """Cycling past end wraps to beginning."""
+        marks = [1000, 2000, 3000]
+        cursor = 2  # at 3000
+        cursor += 1
+        if cursor >= len(marks):
+            cursor = 0
+        assert cursor == 0
+        assert marks[cursor] == 1000
+
+    def test_mark_cycling_wraps_backward(self):
+        """Cycling before start wraps to end."""
+        marks = [1000, 2000, 3000]
+        cursor = 0  # at 1000
+        cursor -= 1
+        if cursor < 0:
+            cursor = len(marks) - 1
+        assert cursor == 2
+        assert marks[cursor] == 3000
+
+
+# ===========================================================================
+# TestWriteTicksPrecomputed (Fix 3 — seek performance)
+# ===========================================================================
+
+class TestWriteTicksPrecomputed:
+    """Tests that _write_ticks is pre-built and used by seek()."""
+
+    def _make_test_stream(self, tmp_path):
+        snap_mem = bytes(RAM_BYTES)
+        data = make_tamstream_bytes(1000, [
+            {"type": REC_RAM_SNAPSHOT, "tick": 1000, "memory": snap_mem},
+            {"type": REC_ROM_WRITE, "tick": 1001, "addr": 0x040, "value": 0x1},
+            {"type": REC_ROM_WRITE, "tick": 1002, "addr": 0x041, "value": 0x2},
+            {"type": REC_ROM_WRITE, "tick": 1003, "addr": 0x040, "value": 0x3},
+        ])
+        return _write_tamstream_to_file(data, tmp_path)
+
+    def test_write_ticks_prebuilt(self, tmp_path):
+        """_write_ticks is a list matching write tick values."""
+        from stream_reader import CachedStateTracker
+        fpath = self._make_test_stream(tmp_path)
+        ts = TamStream(fpath)
+        tracker = CachedStateTracker(ts)
+        assert hasattr(tracker, '_write_ticks')
+        assert tracker._write_ticks == [w[0] for w in tracker._writes]
+        ts.close()
+
+    def test_seek_uses_prebuilt_ticks(self, tmp_path):
+        """seek() still produces correct results after prebuilt optimization."""
+        from stream_reader import CachedStateTracker
+        fpath = self._make_test_stream(tmp_path)
+        ts = TamStream(fpath)
+        tracker = CachedStateTracker(ts)
+        for tick in [1000, 1001, 1002, 1003]:
+            tracker.seek(tick)
+            expected = ts.state_at_tick(tick)
+            assert bytes(tracker.ram) == expected, f"Mismatch at tick {tick}"
+        ts.close()
+
+
+# ===========================================================================
+# TestAddrWriteIndex (Feature B — per-address write index)
+# ===========================================================================
+
+class TestAddrWriteIndex:
+    """Tests for per-address write index and navigation."""
+
+    def _make_test_stream(self, tmp_path):
+        snap_mem = bytes(RAM_BYTES)
+        data = make_tamstream_bytes(1000, [
+            {"type": REC_RAM_SNAPSHOT, "tick": 1000, "memory": snap_mem},
+            {"type": REC_ROM_WRITE, "tick": 1001, "addr": 0x040, "value": 0x1},
+            {"type": REC_ROM_WRITE, "tick": 1002, "addr": 0x041, "value": 0x2},
+            {"type": REC_ROM_WRITE, "tick": 1003, "addr": 0x040, "value": 0x3},
+            {"type": REC_ROM_WRITE, "tick": 1004, "addr": 0x042, "value": 0xA},
+            {"type": REC_ROM_WRITE, "tick": 1005, "addr": 0x040, "value": 0xF},
+        ])
+        return _write_tamstream_to_file(data, tmp_path)
+
+    def test_addr_write_indices_built(self, tmp_path):
+        """_addr_write_indices maps addresses to lists of write indices."""
+        from stream_reader import CachedStateTracker
+        fpath = self._make_test_stream(tmp_path)
+        ts = TamStream(fpath)
+        tracker = CachedStateTracker(ts)
+        assert 0x040 in tracker._addr_write_indices
+        assert 0x041 in tracker._addr_write_indices
+        assert 0x042 in tracker._addr_write_indices
+        # 0x040 is written at indices 0, 2, 4
+        assert len(tracker._addr_write_indices[0x040]) == 3
+        # 0x041 is written once
+        assert len(tracker._addr_write_indices[0x041]) == 1
+        ts.close()
+
+    def test_next_write_to_addrs_from_start(self, tmp_path):
+        """From start, next write to {0x041} returns tick 1002."""
+        from stream_reader import CachedStateTracker
+        fpath = self._make_test_stream(tmp_path)
+        ts = TamStream(fpath)
+        tracker = CachedStateTracker(ts)
+        tracker.seek(1000)
+        tick = tracker.next_write_to_addrs({0x041})
+        assert tick == 1002
+        ts.close()
+
+    def test_next_write_to_addrs_multi(self, tmp_path):
+        """From start, next write to {0x041, 0x042} returns earliest match."""
+        from stream_reader import CachedStateTracker
+        fpath = self._make_test_stream(tmp_path)
+        ts = TamStream(fpath)
+        tracker = CachedStateTracker(ts)
+        tracker.seek(1000)
+        tick = tracker.next_write_to_addrs({0x041, 0x042})
+        assert tick == 1002  # 0x041 at 1002 is before 0x042 at 1004
+        ts.close()
+
+    def test_prev_write_to_addrs(self, tmp_path):
+        """From end, prev write to {0x042} returns tick 1004."""
+        from stream_reader import CachedStateTracker
+        fpath = self._make_test_stream(tmp_path)
+        ts = TamStream(fpath)
+        tracker = CachedStateTracker(ts)
+        tracker.seek(1005)
+        tracker.step_forward(100)  # exhaust writes
+        tick = tracker.prev_write_to_addrs({0x042})
+        assert tick == 1004
+        ts.close()
+
+    def test_next_write_to_addrs_none_past_end(self, tmp_path):
+        """No more writes to addr returns None."""
+        from stream_reader import CachedStateTracker
+        fpath = self._make_test_stream(tmp_path)
+        ts = TamStream(fpath)
+        tracker = CachedStateTracker(ts)
+        tracker.seek(1005)
+        tracker.step_forward(100)
+        tick = tracker.next_write_to_addrs({0x040})
+        assert tick is None
+        ts.close()
+
+    def test_prev_write_to_addrs_none_at_start(self, tmp_path):
+        """No prior writes to addr returns None."""
+        from stream_reader import CachedStateTracker
+        fpath = self._make_test_stream(tmp_path)
+        ts = TamStream(fpath)
+        tracker = CachedStateTracker(ts)
+        tracker.seek(1000)
+        tick = tracker.prev_write_to_addrs({0x040})
+        assert tick is None
+        ts.close()
+
+    def test_empty_addrs_returns_none(self, tmp_path):
+        """Empty address set returns None."""
+        from stream_reader import CachedStateTracker
+        fpath = self._make_test_stream(tmp_path)
+        ts = TamStream(fpath)
+        tracker = CachedStateTracker(ts)
+        tracker.seek(1000)
+        assert tracker.next_write_to_addrs(set()) is None
+        assert tracker.prev_write_to_addrs(set()) is None
+        ts.close()
+
+
+# ===========================================================================
+# TestMemoryGridSelection (Feature A — address selection)
+# ===========================================================================
+
+class TestMemoryGridSelection:
+    """Tests for hex grid address selection state."""
+
+    def test_initial_selection_empty(self):
+        """Grid starts with no selection."""
+        _ensure_qapp()
+        from stream_viewer import MemoryGridWidget
+        grid = MemoryGridWidget()
+        assert grid.selected_addresses() == set()
+
+    def test_clear_selection(self):
+        """clear_selection empties the set."""
+        _ensure_qapp()
+        from stream_viewer import MemoryGridWidget
+        grid = MemoryGridWidget()
+        grid._selected_addrs = {0x040, 0x041}
+        grid.clear_selection()
+        assert grid.selected_addresses() == set()
+
+    def test_addr_range_single(self):
+        """Range from addr to itself is just that addr."""
+        _ensure_qapp()
+        from stream_viewer import MemoryGridWidget
+        grid = MemoryGridWidget()
+        result = grid._addr_range(0x040, 0x040)
+        assert result == {0x040}
+
+    def test_addr_range_horizontal(self):
+        """Range across same row."""
+        _ensure_qapp()
+        from stream_viewer import MemoryGridWidget
+        grid = MemoryGridWidget()
+        # Addrs 0x000..0x01F are row 0 (32 cols). 0x002 to 0x005 = 4 addrs.
+        result = grid._addr_range(0x002, 0x005)
+        assert result == {0x002, 0x003, 0x004, 0x005}
+
+    def test_addr_range_rectangular(self):
+        """Range spanning multiple rows forms a rectangle."""
+        _ensure_qapp()
+        from stream_viewer import MemoryGridWidget
+        grid = MemoryGridWidget()
+        # Row 0 col 0 = 0x000, Row 1 col 1 = 0x021
+        result = grid._addr_range(0x000, 0x021)
+        # Rectangle: rows 0-1, cols 0-1
+        assert result == {0x000, 0x001, 0x020, 0x021}
+
+
+# ===========================================================================
+# TestBookmarkButtons (Feature C)
+# ===========================================================================
+
+class TestBookmarkButtons:
+    """Tests for bookmark button existence in NavigationBar."""
+
+    def test_nav_bar_has_bookmark_buttons(self):
+        """NavigationBar has +Bk, <Bk, Bk> buttons."""
+        _ensure_qapp()
+        from stream_viewer import NavigationBar
+        nav = NavigationBar()
+        assert hasattr(nav, 'btn_add_bookmark')
+        assert hasattr(nav, 'btn_prev_bookmark')
+        assert hasattr(nav, 'btn_next_bookmark')
+        assert nav.btn_add_bookmark.text() == "+Bk"
+        assert nav.btn_prev_bookmark.text() == "<Bk"
+        assert nav.btn_next_bookmark.text() == "Bk>"
+
+
+# ===========================================================================
+# TestBookmarkStore (persistent bookmarks)
+# ===========================================================================
+
+class TestBookmarkStore:
+    """Tests for the BookmarkStore sidecar JSON system."""
+
+    def test_add_and_list(self, tmp_path):
+        """Add bookmarks, verify they come back sorted."""
+        from bookmark_store import BookmarkStore
+        store = BookmarkStore(str(tmp_path / "test.tamstream"))
+        store.add(3000)
+        store.add(1000)
+        store.add(2000)
+        assert store.ticks == [1000, 2000, 3000]
+
+    def test_toggle(self, tmp_path):
+        """Toggle adds, then removes."""
+        from bookmark_store import BookmarkStore
+        store = BookmarkStore(str(tmp_path / "test.tamstream"))
+        assert store.toggle(5000) is True   # added
+        assert store.ticks == [5000]
+        assert store.toggle(5000) is False  # removed
+        assert store.ticks == []
+
+    def test_no_duplicate(self, tmp_path):
+        """Adding same tick twice returns False."""
+        from bookmark_store import BookmarkStore
+        store = BookmarkStore(str(tmp_path / "test.tamstream"))
+        assert store.add(5000) is True
+        assert store.add(5000) is False
+        assert store.ticks == [5000]
+
+    def test_remove(self, tmp_path):
+        """Remove existing returns True, non-existing returns False."""
+        from bookmark_store import BookmarkStore
+        store = BookmarkStore(str(tmp_path / "test.tamstream"))
+        store.add(5000)
+        assert store.remove(5000) is True
+        assert store.remove(5000) is False
+
+    def test_persistence(self, tmp_path):
+        """Bookmarks survive reload from disk."""
+        from bookmark_store import BookmarkStore
+        path = str(tmp_path / "test.tamstream")
+        store1 = BookmarkStore(path)
+        store1.add(1000)
+        store1.add(3000)
+        store1.add(2000)
+
+        store2 = BookmarkStore(path)
+        assert store2.ticks == [1000, 2000, 3000]
+
+    def test_sidecar_path(self):
+        """Sidecar path derived correctly."""
+        from bookmark_store import BookmarkStore
+        store = BookmarkStore("/some/path/foo.tamstream")
+        assert store.sidecar_path == "/some/path/foo.tamstream.bookmarks.json"
+
+    def test_empty_store(self, tmp_path):
+        """New store with no file returns empty list."""
+        from bookmark_store import BookmarkStore
+        store = BookmarkStore(str(tmp_path / "nonexistent.tamstream"))
+        assert store.ticks == []
+
+
+# ===========================================================================
+# TestButtonTooltips
+# ===========================================================================
+
+class TestButtonTooltips:
+    """Every nav bar button should have a non-empty tooltip."""
+
+    def test_all_nav_buttons_have_tooltips(self):
+        _ensure_qapp()
+        from stream_viewer import NavigationBar
+        nav = NavigationBar()
+        buttons = [
+            nav.btn_home, nav.btn_back_1s, nav.btn_back_10, nav.btn_back_1,
+            nav.btn_fwd_1, nav.btn_fwd_10, nav.btn_fwd_1s, nav.btn_end,
+            nav.btn_play, nav.btn_prev_lcd, nav.btn_next_lcd,
+            nav.btn_prev_sel, nav.btn_next_sel,
+            nav.btn_add_bookmark, nav.btn_prev_bookmark, nav.btn_next_bookmark,
+        ]
+        for btn in buttons:
+            assert btn.toolTip(), f"Button '{btn.text()}' has no tooltip"
+
+    def test_sel_buttons_exist(self):
+        """<Sel and Sel> buttons exist in NavigationBar."""
+        _ensure_qapp()
+        from stream_viewer import NavigationBar
+        nav = NavigationBar()
+        assert hasattr(nav, 'btn_prev_sel')
+        assert hasattr(nav, 'btn_next_sel')
+        assert nav.btn_prev_sel.text() == "<Sel"
+        assert nav.btn_next_sel.text() == "Sel>"
