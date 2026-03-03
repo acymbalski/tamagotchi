@@ -584,7 +584,7 @@ class HelpOverlay(QWidget):
     A                    Annotate current tick
     B                    Toggle bookmark
     L                    Launch sim here
-    T                    Open in TamaTool
+    T                    Open in TamaTool  (non-Windows only)
     ? / F1               Toggle this help
     Escape               Clear hex grid selection
 
@@ -894,6 +894,8 @@ class StreamViewer(QMainWindow):
         self.tamatool_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.tamatool_btn.setToolTip("Load current memory state into TamaTool live editor  [T]")
         self.tamatool_btn.clicked.connect(self._launch_tamatool)
+        if sys.platform == "win32":
+            self.tamatool_btn.setVisible(False)
         left_layout.addWidget(self.tamatool_btn)
 
         scroll = QScrollArea()
@@ -1475,7 +1477,7 @@ class StreamViewer(QMainWindow):
             self.annotation_input.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         elif key == Qt.Key.Key_L:
             self._launch_sim()
-        elif key == Qt.Key.Key_T:
+        elif key == Qt.Key.Key_T and sys.platform != "win32":
             self._launch_tamatool()
         elif key == Qt.Key.Key_B:
             self._toggle_mark()
