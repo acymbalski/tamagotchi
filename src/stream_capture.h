@@ -5,10 +5,29 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <vector>
+
+#include "miniz.h"
 
 // File magic and version
 #define STREAM_MAGIC        "TAMS"
-#define STREAM_VERSION      2
+#define STREAM_VERSION      3
+
+// Compression flags (stored in header byte 12)
+#define STREAM_COMPRESS_NONE   0x00
+#define STREAM_COMPRESS_ZLIB   0x01
+
+// Segment size: 1 emulated hour = 3600 * 32768 ticks
+#define STREAM_SEGMENT_TICKS  (3600UL * 32768UL)
+
+// On-disk index magic
+#define STREAM_INDEX_MAGIC "TIDX"
+
+struct StreamIndexEntry {
+    uint32_t tick;
+    uint64_t offset;     // byte offset in uncompressed record stream (0 = first record byte)
+    uint8_t  recordType;
+};
 
 // Record type tags
 #define STREAM_REC_RAM_SNAPSHOT      0x01
@@ -65,8 +84,12 @@ public:
     ~StreamCapture();
 
     void start(const char* filename, uint32_t startTick, const uint8_t* initialMemory);
+    void startSegmented(const char* dirPath, uint32_t startTick, const uint8_t* initialMemory);
     void stop();
     bool isActive() const { return active; }
+
+    bool shouldRotate(uint32_t tick) const;
+    void rotateSegment(uint32_t tick, const uint8_t* currentMemory);
 
     void logRomWrite(uint32_t tick, uint16_t addr, uint8_t value);
     void logBabysitterWrite(uint32_t tick, uint16_t addr, uint8_t value, BabysitterFuncId func);
@@ -79,11 +102,31 @@ public:
 private:
     void flushBuffer();
     void bufferWrite(const void* data, size_t size);
+    void openSegment(uint32_t tick, const uint8_t* memory);
 
     FILE* file;
     bool active;
     uint8_t buffer[STREAM_BUFFER_SIZE];
     size_t bufferPos;
+
+    // Delta filter shadow memory (320 packed bytes, same layout as cpuState.memory)
+    uint8_t shadowMemory[STREAM_RAM_BYTES];
+    uint64_t filteredCount;
+
+    // Compression
+    mz_stream zstream;
+    uint8_t compressBuffer[STREAM_BUFFER_SIZE];
+    bool compressed;
+
+    // On-disk index
+    std::vector<StreamIndexEntry> indexEntries;
+    uint64_t uncompressedOffset;
+
+    // Segmentation
+    char baseDir[512];
+    uint32_t segmentIndex;
+    uint32_t segmentStartTick;
+    bool segmented;
 };
 
 // Global capture instance (null when not capturing)

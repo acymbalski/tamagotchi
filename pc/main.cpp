@@ -797,14 +797,14 @@ static int hal_handler(void) {
                     snprintf(streamsDir, MAX_PATH, "%s\\streams", CAPTURES_DIR);
                     CreateDirectoryA(streamsDir, NULL);
                     cpu_get_state(&cpuState);
-                    char streamPath[MAX_PATH];
-                    snprintf(streamPath, MAX_PATH, "%s\\streams\\stream_%u.tamstream", CAPTURES_DIR, cpuState.tick_counter);
+                    char streamDir[MAX_PATH];
+                    snprintf(streamDir, MAX_PATH, "%s\\streams\\stream_%u", CAPTURES_DIR, cpuState.tick_counter);
                     g_streamCapture = new StreamCapture();
-                    g_streamCapture->start(streamPath, cpuState.tick_counter, cpuState.memory);
+                    g_streamCapture->startSegmented(streamDir, cpuState.tick_counter, cpuState.memory);
                     lastStreamSnapshotTick = cpuState.tick_counter;
                     lastStreamTickMarkerTick = cpuState.tick_counter;
                     lastStreamLcdFrameTick = cpuState.tick_counter;
-                    printf("[stream] Recording started: %s\n", streamPath);
+                    printf("[stream] Recording started: %s\n", streamDir);
                 }
                 fflush(stdout);
 #endif
@@ -1057,14 +1057,14 @@ int main(int argc, char **argv) {
         snprintf(autoStreamsDir, MAX_PATH, "%s\\streams", CAPTURES_DIR);
         CreateDirectoryA(autoStreamsDir, NULL);
         cpu_get_state(&cpuState);
-        static char autoStreamPath[MAX_PATH];
-        snprintf(autoStreamPath, MAX_PATH, "%s\\streams\\stream_%u.tamstream", CAPTURES_DIR, cpuState.tick_counter);
+        static char autoStreamDir[MAX_PATH];
+        snprintf(autoStreamDir, MAX_PATH, "%s\\streams\\stream_%u", CAPTURES_DIR, cpuState.tick_counter);
         g_streamCapture = new StreamCapture();
-        g_streamCapture->start(autoStreamPath, cpuState.tick_counter, cpuState.memory);
+        g_streamCapture->startSegmented(autoStreamDir, cpuState.tick_counter, cpuState.memory);
         lastStreamSnapshotTick = cpuState.tick_counter;
         lastStreamTickMarkerTick = cpuState.tick_counter;
         lastStreamLcdFrameTick = cpuState.tick_counter;
-        printf("[stream] started %s\n", autoStreamPath);
+        printf("[stream] started %s\n", autoStreamDir);
     }
 #endif
 
@@ -1113,6 +1113,14 @@ int main(int argc, char **argv) {
                     cpu_get_state(&cpuState);
                     uint32_t tick = cpuState.tick_counter;
 
+                    /* Segment rotation check */
+                    if (g_streamCapture->shouldRotate(tick)) {
+                        g_streamCapture->rotateSegment(tick, cpuState.memory);
+                        lastStreamSnapshotTick = tick;
+                        lastStreamTickMarkerTick = tick;
+                        lastStreamLcdFrameTick = tick;
+                    }
+
                     /* RAM snapshot every 1 emu-minute */
                     if (tick - lastStreamSnapshotTick >= 60 * TICK_FREQUENCY) {
                         g_streamCapture->logRamSnapshot(tick, cpuState.memory);
@@ -1125,8 +1133,8 @@ int main(int argc, char **argv) {
                         lastStreamTickMarkerTick = tick;
                     }
 
-                    /* LCD frame capture (~30fps): matrix_buffer (64 bytes) + icon_buffer (8 bytes) */
-                    if (tick - lastStreamLcdFrameTick >= TICK_FREQUENCY / 30) {
+                    /* LCD frame capture (~4fps): matrix_buffer (64 bytes) + icon_buffer (8 bytes) */
+                    if (tick - lastStreamLcdFrameTick >= TICK_FREQUENCY / 4) {
                         uint8_t lcdFrame[STREAM_LCD_BYTES];
                         memcpy(lcdFrame, matrix_buffer, 64);       /* 16 rows * 4 bytes */
                         memcpy(lcdFrame + 64, icon_buffer, 8);     /* 8 icon booleans */

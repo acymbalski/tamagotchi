@@ -60,6 +60,10 @@ set(SOURCES
     ${CMAKE_SOURCE_DIR}/../src/memory.cpp
     ${CMAKE_SOURCE_DIR}/../src/babysitter.cpp
     ${CMAKE_SOURCE_DIR}/../src/stream_capture.cpp
+    ${CMAKE_SOURCE_DIR}/../src/miniz.c
+    ${CMAKE_SOURCE_DIR}/../src/miniz_tdef.c
+    ${CMAKE_SOURCE_DIR}/../src/miniz_tinfl.c
+    ${CMAKE_SOURCE_DIR}/../src/miniz_zip.c
 )
 # src/main.cpp, src/input.cpp, src/networking.cpp, src/savestate.cpp excluded.
 
