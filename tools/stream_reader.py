@@ -5,7 +5,17 @@ import struct
 import os
 import sys
 import bisect
+import io
+import zlib
+import glob as _glob
 from collections import defaultdict
+
+# Compression flags
+STREAM_COMPRESS_NONE = 0x00
+STREAM_COMPRESS_ZLIB = 0x01
+
+# On-disk index magic
+STREAM_INDEX_MAGIC = b"TIDX"
 
 # Record type tags
 REC_RAM_SNAPSHOT     = 0x01
@@ -75,18 +85,124 @@ class TamStream:
         self._rec_sizes = _fixed_sizes(self.lcd_bytes)
         self.start_tick = struct.unpack_from("<I", header, 6)[0]
         self.ram_nibbles = struct.unpack_from("<H", header, 10)[0]
+        self.compression = header[12] if self.version >= 3 else STREAM_COMPRESS_NONE
+        self._raw_file = None
+
+        if self.compression == STREAM_COMPRESS_ZLIB:
+            # Read all remaining compressed data and decompress into BytesIO
+            compressed_data = self._file.read()
+            self._raw_file = self._file   # keep raw file handle for TIDX index
+            self._file = io.BytesIO(zlib.decompress(compressed_data, -15))
+            self._records_start = 0       # BytesIO starts at first record byte
+        else:
+            self._records_start = 16      # raw file: records start after 16-byte header
+
+    def _try_read_ondisk_index(self):
+        """Try to read TIDX on-disk index. Returns True if found and loaded."""
+        try:
+            raw = self._raw_file if self._raw_file else self._file
+            if raw is None:
+                return False
+            # Read index_start from last 8 bytes of raw file
+            raw.seek(-8, 2)
+            idx_start_bytes = raw.read(8)
+            if len(idx_start_bytes) < 8:
+                return False
+            index_start = struct.unpack("<Q", idx_start_bytes)[0]
+            # Seek to index start and verify magic
+            raw.seek(index_start)
+            magic = raw.read(4)
+            if magic != STREAM_INDEX_MAGIC:
+                return False
+            count_bytes = raw.read(4)
+            if len(count_bytes) < 4:
+                return False
+            count = struct.unpack("<I", count_bytes)[0]
+            snaps = []
+            lcds = []
+            for _ in range(count):
+                entry_data = raw.read(13)  # tick(4) + offset(8) + type(1)
+                if len(entry_data) < 13:
+                    return False
+                tick = struct.unpack_from("<I", entry_data, 0)[0]
+                offset = struct.unpack_from("<Q", entry_data, 4)[0]
+                rec_type = entry_data[12]
+                # For compressed streams: offset is BytesIO position (0-based)
+                # For uncompressed streams: offset is from start of records (add 16 for raw file)
+                seek_pos = offset if self._raw_file else (offset + 16)
+                if rec_type == REC_RAM_SNAPSHOT:
+                    snaps.append((tick, seek_pos))
+                elif rec_type == REC_LCD_FRAME:
+                    lcds.append((tick, seek_pos))
+            self._snapshot_positions = snaps
+            self._lcd_frame_index = lcds
+            return True
+        except Exception:
+            return False
 
     def _build_index(self, progress_callback=None):
         """Scan the file and build an index of record positions."""
-        self._records_start = 16
-        self._snapshot_positions = []  # (tick, file_offset) for RAM snapshots
-        self._lcd_frame_index = []     # (tick, file_offset) for LCD frames
+        # _records_start set by _parse_header based on compression
+        self._snapshot_positions = []  # (tick, seek_offset) for RAM snapshots
+        self._lcd_frame_index = []     # (tick, seek_offset) for LCD frames
         self._tick_marker_ticks = []   # tick values for tick markers
         self._annotation_records = []  # (tick, text)
         self._button_records = []      # (tick, button_id, state)
         self._first_tick = None
         self._last_tick = None
         self._record_count = 0
+
+        # Try TIDX fast path (skips linear scan for snapshots/LCD frames)
+        if self._try_read_ondisk_index() and self._snapshot_positions:
+            # Set tick range from the index
+            if self._snapshot_positions:
+                self._first_tick = self._snapshot_positions[0][0]
+                self._last_tick = self._snapshot_positions[-1][0]
+            if self._lcd_frame_index:
+                last_lcd_tick = self._lcd_frame_index[-1][0]
+                if self._last_tick is None or last_lcd_tick > self._last_tick:
+                    self._last_tick = last_lcd_tick
+            # Still need annotations/buttons/tick markers — do a lightweight metadata scan
+            f = self._file
+            f.seek(self._records_start)
+            while True:
+                tag_byte = f.read(1)
+                if not tag_byte:
+                    break
+                tag = tag_byte[0]
+                if tag == REC_ANNOTATION:
+                    data = f.read(6)
+                    if len(data) < 6:
+                        break
+                    tick = struct.unpack_from("<I", data, 0)[0]
+                    text_len = struct.unpack_from("<H", data, 4)[0]
+                    text_data = f.read(text_len)
+                    self._annotation_records.append((tick, text_data.decode("utf-8", errors="replace")))
+                elif tag in self._rec_sizes:
+                    size = self._rec_sizes[tag]
+                    data = f.read(size)
+                    if len(data) < size:
+                        break
+                    tick = struct.unpack_from("<I", data, 0)[0]
+                    if tag == REC_TICK_MARKER:
+                        self._tick_marker_ticks.append(tick)
+                    elif tag == REC_BUTTON_EVENT:
+                        button_id = data[4]
+                        state = data[5]
+                        self._button_records.append((tick, button_id, state))
+                else:
+                    break
+            # Build LCD change index from the TIDX-loaded lcd_frame_index
+            self._lcd_change_ticks = []
+            prev_data = None
+            for tick, offset in self._lcd_frame_index:
+                frame_data = self.read_lcd_frame_at(offset)
+                if prev_data is not None and frame_data != prev_data:
+                    self._lcd_change_ticks.append(tick)
+                prev_data = frame_data
+            if progress_callback:
+                progress_callback(100, f"Indexed {len(self._snapshot_positions)} snapshots (TIDX)")
+            return
 
         f = self._file
         file_size = f.seek(0, 2)
@@ -369,6 +485,9 @@ class TamStream:
         if self._file:
             self._file.close()
             self._file = None
+        if self._raw_file:
+            self._raw_file.close()
+            self._raw_file = None
 
     def __del__(self):
         self.close()
@@ -378,6 +497,93 @@ class TamStream:
 
     def __exit__(self, *args):
         self.close()
+
+
+class SegmentedTamStream:
+    """Read a directory of segmented .tamstream files as a unified stream.
+
+    Opens each seg_NNN.tamstream in order, concatenates all decompressed
+    record data into a single BytesIO, then exposes the same interface as
+    TamStream. CachedStateTracker works unchanged because _file, _snapshot_positions,
+    _lcd_frame_index etc. all have the same semantics.
+    """
+
+    def __init__(self, dirpath, progress_callback=None):
+        self.dirpath = dirpath
+        self.filepath = dirpath  # viewer compatibility
+
+        seg_files = sorted(_glob.glob(os.path.join(dirpath, "seg_*.tamstream")))
+        if not seg_files:
+            raise ValueError(f"No segments found in: {dirpath}")
+
+        all_records = bytearray()
+        version = 1
+
+        for i, seg_path in enumerate(seg_files):
+            if progress_callback:
+                pct = int(i * 70 / len(seg_files))
+                progress_callback(pct, f"Loading segment {i+1}/{len(seg_files)}...")
+            seg = TamStream(seg_path)
+            version = max(version, seg.version)
+            seg._file.seek(seg._records_start)
+            all_records.extend(seg._file.read())
+            seg.close()
+
+        self.version = version
+        self.lcd_bytes = LCD_BYTES_V2 if version >= 2 else LCD_BYTES_V1
+        self._rec_sizes = _fixed_sizes(self.lcd_bytes)
+        self.ram_nibbles = 0x280
+        self.start_tick = None
+        self.compression = STREAM_COMPRESS_NONE
+        self._raw_file = None
+
+        # Unified BytesIO of all concatenated record data (no header)
+        self._file = io.BytesIO(bytes(all_records))
+        self._records_start = 0
+
+        TamStream._build_index(self, progress_callback)
+
+    @property
+    def tick_range(self):
+        return (self._first_tick, self._last_tick)
+
+    # Delegate all TamStream methods to operate on self._file
+    records = TamStream.records
+    state_at_tick = TamStream.state_at_tick
+    stats_at_tick = TamStream.stats_at_tick
+    writes_in_range = TamStream.writes_in_range
+    annotations = TamStream.annotations
+    lcd_frames = TamStream.lcd_frames
+    button_events = TamStream.button_events
+    next_lcd_change = TamStream.next_lcd_change
+    prev_lcd_change = TamStream.prev_lcd_change
+    read_lcd_frame_at = TamStream.read_lcd_frame_at
+    nearest_lcd_frame = TamStream.nearest_lcd_frame
+    _try_read_ondisk_index = TamStream._try_read_ondisk_index
+
+    def close(self):
+        if self._file:
+            self._file.close()
+            self._file = None
+
+    def __del__(self):
+        self.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+
+def open_stream(path, progress_callback=None):
+    """Open a .tamstream file or a segment directory.
+
+    Returns a TamStream for single files, SegmentedTamStream for directories.
+    """
+    if os.path.isdir(path):
+        return SegmentedTamStream(path, progress_callback=progress_callback)
+    return TamStream(path, progress_callback=progress_callback)
 
 
 class CachedStateTracker:

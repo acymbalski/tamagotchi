@@ -8,7 +8,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(__file__))
-from stream_reader import TamStream, REC_ROM_WRITE, REC_BABYSITTER_WRITE, BFID_NAMES
+from stream_reader import TamStream, open_stream, REC_ROM_WRITE, REC_BABYSITTER_WRITE, BFID_NAMES
 
 
 def parse_addresses(addr_str):
@@ -46,7 +46,7 @@ def main():
                         help="Print decoded stats at a specific tick")
     args = parser.parse_args()
 
-    stream = TamStream(args.tamstream_file)
+    stream = open_stream(args.tamstream_file)
 
     # --stats-at mode
     if args.stats_at is not None:

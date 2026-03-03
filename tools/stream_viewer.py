@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from stream_reader import (
-    TamStream, CachedStateTracker,
+    TamStream, CachedStateTracker, open_stream,
     REC_ANNOTATION, REC_BUTTON_EVENT, REC_TICK_MARKER,
     BUTTON_NAMES, BUTTON_STATES,
 )
@@ -764,7 +764,7 @@ class StreamViewer(QMainWindow):
                 app.processEvents()
 
         stream_progress(0, "Parsing stream file...")
-        self.stream = TamStream(filepath, progress_callback=stream_progress)
+        self.stream = open_stream(filepath, progress_callback=stream_progress)
 
         stream_progress(50, "Building write index...")
         self.tracker = CachedStateTracker(self.stream, progress_callback=stream_progress)
@@ -897,6 +897,15 @@ class StreamViewer(QMainWindow):
         if sys.platform == "win32":
             self.tamatool_btn.setVisible(False)
         left_layout.addWidget(self.tamatool_btn)
+
+        self.export_tt_btn = QPushButton("Export TamaTool Save")
+        self.export_tt_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.export_tt_btn.setToolTip(
+            "Export current RAM as a TamaTool-compatible save file (.bin)\n"
+            "CPU registers will be zeroed; RAM will reflect the current tick."
+        )
+        self.export_tt_btn.clicked.connect(self._export_tamatool_save)
+        left_layout.addWidget(self.export_tt_btn)
 
         scroll = QScrollArea()
         scroll.setWidget(left_widget)
@@ -1419,6 +1428,83 @@ class StreamViewer(QMainWindow):
                                 f"Error launching TamaTool:\n{e}\n\n"
                                 f"Exe: {exe_path}\n"
                                 f"Raw 320-byte RAM written to: {tmp.name}")
+
+    @staticmethod
+    def _build_tamatool_savestate(ram_320: bytes, tick: int) -> bytes:
+        """Build a TamaTool-compatible save state binary (4140 bytes).
+
+        Format (reverse-engineered from save0.bin):
+          Bytes  0- 1: pc        (u16 LE) — zeroed (reset-like state)
+          Bytes  2- 3: x         (u16 LE) — zeroed
+          Bytes  4- 5: y         (u16 LE) — zeroed
+          Byte   6   : a         (u8)     — zeroed
+          Byte   7   : b         (u8)     — zeroed
+          Byte   8   : np        (u8)     — zeroed
+          Byte   9   : sp        (u8)     — 0xFC (typical init)
+          Byte  10   : flags     (u8)     — zeroed
+          Bytes 11-14: tick_counter (u32 LE) — set to captured tick
+          Bytes 15-18: prog_timer_timestamp (u32 LE) — zeroed
+          Byte  19   : prog_timer_enabled (u8) — 0
+          Byte  20   : prog_timer_data    (u8) — 0
+          Byte  21   : prog_timer_rld     (u8) — 0
+          Bytes 22-25: call_depth (u32 LE) — zeroed
+          Bytes 26-43: 6 interrupt slots × 3 bytes (factor, mask, triggered) — zeroed
+          Bytes 44-4139: 4096 nibble bytes (1 nibble per byte, 0-15)
+            nibble[0x000..0x27F] = unpacked from ram_320 (640 nibbles)
+            nibble[0x280..0xFFF] = 0x00 (unused/IO region)
+        """
+        import struct
+
+        out = bytearray(4140)
+        # CPU registers
+        struct.pack_into('<H', out, 0, 0)       # pc = 0
+        struct.pack_into('<H', out, 2, 0)       # x = 0
+        struct.pack_into('<H', out, 4, 0)       # y = 0
+        out[6] = 0                              # a
+        out[7] = 0                              # b
+        out[8] = 0                              # np
+        out[9] = 0xFC                           # sp (typical initial value)
+        out[10] = 0                             # flags
+        # Timers
+        struct.pack_into('<I', out, 11, tick & 0xFFFFFFFF)  # tick_counter
+        struct.pack_into('<I', out, 15, 0)      # prog_timer_timestamp
+        out[19] = 0                             # prog_timer_enabled
+        out[20] = 0                             # prog_timer_data
+        out[21] = 0                             # prog_timer_rld
+        struct.pack_into('<I', out, 22, 0)      # call_depth
+        # Interrupts (bytes 26-43): all zero
+        # Memory dump: 4096 nibble-bytes starting at offset 44
+        for addr in range(640):                 # RAM nibbles 0x000-0x27F
+            byte_idx = addr >> 1
+            if byte_idx < len(ram_320):
+                if (addr & 1) == 0:
+                    nibble = (ram_320[byte_idx] >> 4) & 0x0F
+                else:
+                    nibble = ram_320[byte_idx] & 0x0F
+            else:
+                nibble = 0
+            out[44 + addr] = nibble
+        # Addresses 0x280-0xFFF remain zero (already zeroed)
+        return bytes(out)
+
+    def _export_tamatool_save(self):
+        """Export current state as a TamaTool-compatible save file."""
+        ram = self.tracker.ram
+        tick = self.current_tick
+        data = self._build_tamatool_savestate(ram, tick)
+
+        default_name = f"save_tick{tick}.bin"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export TamaTool Save", default_name,
+            "Binary files (*.bin);;All files (*)"
+        )
+        if not path:
+            return
+        try:
+            with open(path, "wb") as f:
+                f.write(data)
+        except Exception as e:
+            QMessageBox.warning(self, "Export Failed", f"Could not write file:\n{e}")
 
     # --- Keyboard handling ---
 
