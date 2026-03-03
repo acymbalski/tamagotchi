@@ -71,41 +71,87 @@ DANGER_RANGE = range(0x060, 0x080)
 # ===========================================================================
 
 class LcdWidget(QWidget):
-    """Renders LCD frame data as a pixel grid."""
+    """Renders LCD pixel matrix (32x16) and 8 icons from frame data.
+
+    Frame data layout (v2, 72 bytes):
+        bytes 0-63:  matrix_buffer[16][4] — packed pixels, MSB=leftmost
+        bytes 64-71: icon_buffer[8] — one byte per icon (0=off, nonzero=on)
+
+    v1 frames (50 bytes) or all-zero frames show a placeholder message.
+    """
+
+    LCD_W, LCD_H = 32, 16
+    ICON_NUM = 8
+    ICON_LABELS = ["FOOD", "LGHT", "GAME", "MED", "BATH", "STAT", "DISC", "ATTN"]
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.frame_data = None
-        self.setFixedSize(256, 128)
+        self.setFixedSize(256, 160)  # 128 for pixels + 32 for icons
 
     def set_frame(self, data):
         self.frame_data = data
         self.update()
 
+    def _has_matrix_data(self):
+        """Check if frame has real pixel data (not all zeros in matrix region)."""
+        if self.frame_data is None:
+            return False
+        matrix = self.frame_data[:64] if len(self.frame_data) >= 64 else self.frame_data
+        return not all(b == 0 for b in matrix)
+
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor(200, 210, 200))
+        bg = QColor(200, 210, 200)
+        painter.fillRect(self.rect(), bg)
 
-        if self.frame_data is None or all(b == 0 for b in self.frame_data):
+        pixel_area_h = 128  # 16 rows * 8px each
+        icon_area_y = pixel_area_h + 2
+
+        if not self._has_matrix_data():
             painter.setPen(QColor(100, 100, 100))
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter,
-                             "LCD: placeholder zeros\n(capture needs matrix_buffer hook)")
+            painter.drawText(0, 0, self.width(), pixel_area_h,
+                             Qt.AlignmentFlag.AlignCenter,
+                             "No LCD data\n(v1 stream or not yet captured)")
             painter.end()
             return
 
-        pixel_w = self.width() // 32
-        pixel_h = self.height() // 16
+        # --- Pixel matrix (32x16) ---
+        pixel_w = self.width() // self.LCD_W
+        pixel_h = pixel_area_h // self.LCD_H
 
-        for y in range(16):
-            for x in range(32):
-                byte_idx = (y * 32 + x) // 8
+        for y in range(self.LCD_H):
+            for x in range(self.LCD_W):
+                byte_idx = y * 4 + x // 8
                 bit_idx = 7 - (x % 8)
                 if byte_idx < len(self.frame_data):
                     on = (self.frame_data[byte_idx] >> bit_idx) & 1
                 else:
                     on = 0
-                color = QColor(0, 0, 140) if on else QColor(200, 210, 200)
-                painter.fillRect(x * pixel_w, y * pixel_h, pixel_w - 1, pixel_h - 1, color)
+                color = QColor(20, 20, 100) if on else bg
+                painter.fillRect(x * pixel_w, y * pixel_h,
+                                 pixel_w - 1, pixel_h - 1, color)
+
+        # --- Icons (below pixel matrix) ---
+        if len(self.frame_data) >= 72:
+            icon_data = self.frame_data[64:72]
+            slot_w = self.width() // self.ICON_NUM
+            font = QFont("Consolas", 7)
+            font.setStyleHint(QFont.StyleHint.Monospace)
+            painter.setFont(font)
+
+            for i in range(self.ICON_NUM):
+                on = icon_data[i] != 0
+                ix = i * slot_w
+                if on:
+                    painter.fillRect(ix + 2, icon_area_y, slot_w - 4, 12,
+                                     QColor(20, 20, 100))
+                    painter.setPen(QColor(200, 210, 200))
+                else:
+                    painter.setPen(QColor(140, 150, 140))
+                label = self.ICON_LABELS[i] if i < len(self.ICON_LABELS) else f"I{i}"
+                painter.drawText(ix, icon_area_y, slot_w, 14,
+                                 Qt.AlignmentFlag.AlignCenter, label)
 
         painter.end()
 

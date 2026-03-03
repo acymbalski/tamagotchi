@@ -377,9 +377,56 @@ class TestStreamSynthetic:
         assert writes[0][2]["source"] == "babysitter"
         ts.close()
 
+    def test_v2_lcd_frame_parsed(self, tmp_path):
+        """V2 stream with 72-byte LCD frame is parsed correctly."""
+        # Build a frame: 64 bytes matrix + 8 bytes icons
+        matrix = bytearray(64)
+        matrix[0] = 0x80  # top-left pixel on (row 0, col 0)
+        matrix[4] = 0x01  # row 1, col 7 on
+        icons = bytearray(8)
+        icons[0] = 1  # FOOD icon on
+        icons[3] = 1  # MED icon on
+        lcd_data = bytes(matrix) + bytes(icons)
+
+        data = make_tamstream_bytes(1000, [
+            {"type": REC_RAM_SNAPSHOT, "tick": 1000, "memory": bytes(RAM_BYTES)},
+            {"type": REC_LCD_FRAME, "tick": 1100, "display": lcd_data},
+        ], version=2)
+        fpath = _write_tamstream_to_file(data, tmp_path)
+        ts = TamStream(fpath)
+
+        assert ts.version == 2
+        assert ts.lcd_bytes == 72
+        frame = ts.nearest_lcd_frame(1100)
+        assert frame is not None
+        tick, frame_data = frame
+        assert tick == 1100
+        assert len(frame_data) == 72
+        assert frame_data[0] == 0x80  # matrix byte 0
+        assert frame_data[64] == 1    # icon 0 (FOOD) on
+        assert frame_data[67] == 1    # icon 3 (MED) on
+        ts.close()
+
+    def test_v1_lcd_frame_compat(self, tmp_path):
+        """V1 stream with 50-byte LCD frame still parses."""
+        lcd_data = bytes(50)
+        data = make_tamstream_bytes(1000, [
+            {"type": REC_RAM_SNAPSHOT, "tick": 1000, "memory": bytes(RAM_BYTES)},
+            {"type": REC_LCD_FRAME, "tick": 1100, "display": lcd_data},
+        ], version=1)
+        fpath = _write_tamstream_to_file(data, tmp_path)
+        ts = TamStream(fpath)
+
+        assert ts.version == 1
+        assert ts.lcd_bytes == 50
+        frame = ts.nearest_lcd_frame(1100)
+        assert frame is not None
+        assert len(frame[1]) == 50
+        ts.close()
+
 
 # ===========================================================================
-# TestAnnotationStore (placeholder — filled in TICKET-21)
+# TestAnnotationStore
 # ===========================================================================
 
 class TestAnnotationStore:

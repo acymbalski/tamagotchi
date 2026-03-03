@@ -8,7 +8,7 @@
 
 // File magic and version
 #define STREAM_MAGIC        "TAMS"
-#define STREAM_VERSION      1
+#define STREAM_VERSION      2
 
 // Record type tags
 #define STREAM_REC_RAM_SNAPSHOT      0x01
@@ -30,8 +30,8 @@
 #define STREAM_RAM_BYTES    320
 #define STREAM_RAM_NIBBLES  0x280
 
-// LCD frame data size (display mem: 2 segments of 0x28 nibbles = 80 nibbles = 40 bytes, padded to 50)
-#define STREAM_LCD_BYTES    50
+// LCD frame data size: matrix_buffer (16*4=64 bytes) + icon_buffer (8 bytes) = 72
+#define STREAM_LCD_BYTES    72
 
 // Write buffer size
 #define STREAM_BUFFER_SIZE  65536

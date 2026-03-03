@@ -31,17 +31,28 @@ RECORD_NAMES = {
 BUTTON_NAMES = {0: "LEFT", 1: "MIDDLE", 2: "RIGHT"}
 BUTTON_STATES = {0: "RELEASED", 1: "PRESSED"}
 
-# Fixed record body sizes (after tag byte)
-_FIXED_SIZES = {
-    REC_RAM_SNAPSHOT:     4 + 320,
-    REC_ROM_WRITE:        4 + 2 + 1,
-    REC_BABYSITTER_WRITE: 4 + 2 + 1 + 1,
-    REC_LCD_FRAME:        4 + 50,
-    REC_TICK_MARKER:      4,
-    REC_BUTTON_EVENT:     4 + 1 + 1,
-}
+# LCD frame sizes by stream version
+LCD_BYTES_V1 = 50   # version 1: placeholder zeros (or raw display mem)
+LCD_BYTES_V2 = 72   # version 2: matrix_buffer (64) + icon_buffer (8)
+
+def _fixed_sizes(lcd_bytes=LCD_BYTES_V1):
+    """Record body sizes (after tag byte), parameterized by LCD frame size."""
+    return {
+        REC_RAM_SNAPSHOT:     4 + 320,
+        REC_ROM_WRITE:        4 + 2 + 1,
+        REC_BABYSITTER_WRITE: 4 + 2 + 1 + 1,
+        REC_LCD_FRAME:        4 + lcd_bytes,
+        REC_TICK_MARKER:      4,
+        REC_BUTTON_EVENT:     4 + 1 + 1,
+    }
+
+# Default for backward compat (used by code that doesn't have version info)
+_FIXED_SIZES = _fixed_sizes(LCD_BYTES_V1)
 
 RAM_BYTES = 320  # packed bytes (640 nibbles)
+
+# Icon labels (must match pc/main.cpp icon_labels)
+ICON_LABELS = ["FOOD", "LGHT", "GAME", "MED", "BATH", "STAT", "DISC", "ATTN"]
 
 
 class TamStream:
@@ -58,6 +69,8 @@ class TamStream:
         if len(header) < 16 or header[0:4] != b"TAMS":
             raise ValueError(f"Invalid .tamstream file: {self.filepath}")
         self.version = struct.unpack_from("<H", header, 4)[0]
+        self.lcd_bytes = LCD_BYTES_V2 if self.version >= 2 else LCD_BYTES_V1
+        self._rec_sizes = _fixed_sizes(self.lcd_bytes)
         self.start_tick = struct.unpack_from("<I", header, 6)[0]
         self.ram_nibbles = struct.unpack_from("<H", header, 10)[0]
 
@@ -92,8 +105,8 @@ class TamStream:
                 text_len = struct.unpack_from("<H", data, 4)[0]
                 text_data = f.read(text_len)
                 self._annotation_records.append((tick, text_data.decode("utf-8", errors="replace")))
-            elif tag in _FIXED_SIZES:
-                size = _FIXED_SIZES[tag]
+            elif tag in self._rec_sizes:
+                size = self._rec_sizes[tag]
                 data = f.read(size)
                 if len(data) < size:
                     break
@@ -161,7 +174,7 @@ class TamStream:
                                    "func_id": func_id, "func_name": BFID_NAMES.get(func_id, f"UNKNOWN_{func_id}")})
 
             elif tag == REC_LCD_FRAME:
-                data = f.read(4 + 50)
+                data = f.read(4 + self.lcd_bytes)
                 tick = struct.unpack_from("<I", data, 0)[0]
                 yield (tag, tick, {"display": data[4:]})
 
@@ -223,8 +236,8 @@ class TamStream:
                 tick = struct.unpack_from("<I", hdr, 0)[0]
                 text_len = struct.unpack_from("<H", hdr, 4)[0]
                 f.seek(text_len, 1)
-            elif tag in _FIXED_SIZES:
-                size = _FIXED_SIZES[tag]
+            elif tag in self._rec_sizes:
+                size = self._rec_sizes[tag]
                 data = f.read(size)
                 if len(data) < size:
                     break
@@ -304,7 +317,7 @@ class TamStream:
         """Read LCD frame data from a known file offset."""
         f = self._file
         f.seek(file_offset + 1 + 4)  # skip tag + tick
-        return f.read(50)
+        return f.read(self.lcd_bytes)
 
     def nearest_lcd_frame(self, target_tick):
         """Return (tick, frame_bytes) closest to given tick. Uses index for speed."""

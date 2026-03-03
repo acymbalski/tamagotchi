@@ -15,7 +15,7 @@ REC_BUTTON_EVENT     = 0x07
 RAM_BYTES = 320  # 640 nibbles packed into 320 bytes
 
 
-def make_tamstream_bytes(start_tick, records, ram_nibbles=640):
+def make_tamstream_bytes(start_tick, records, ram_nibbles=640, version=1):
     """Build a .tamstream file as bytes from a list of record dicts.
 
     Each record: {"type": REC_*, "tick": int, ...type-specific fields}
@@ -25,16 +25,17 @@ def make_tamstream_bytes(start_tick, records, ram_nibbles=640):
         REC_RAM_SNAPSHOT:     {"memory": bytes(320)}
         REC_ROM_WRITE:        {"addr": int, "value": int}
         REC_BABYSITTER_WRITE: {"addr": int, "value": int, "func_id": int}
-        REC_LCD_FRAME:        {"display": bytes(50)}
+        REC_LCD_FRAME:        {"display": bytes(50 for v1, 72 for v2)}
         REC_ANNOTATION:       {"text": str}
         REC_TICK_MARKER:      {}
         REC_BUTTON_EVENT:     {"button_id": int, "state": int}
     """
+    lcd_bytes = 72 if version >= 2 else 50
     buf = io.BytesIO()
 
     # Header: "TAMS" + version(u16) + start_tick(u32) + ram_nibbles(u16) + padding(4)
     header = b"TAMS"
-    header += struct.pack("<H", 1)  # version
+    header += struct.pack("<H", version)
     header += struct.pack("<I", start_tick)  # start_tick
     header += struct.pack("<H", ram_nibbles)  # ram_nibbles
     header += b"\x00" * 4  # padding to 16 bytes
@@ -65,8 +66,8 @@ def make_tamstream_bytes(start_tick, records, ram_nibbles=640):
             buf.write(struct.pack("B", rec.get("func_id", 0)))
 
         elif rtype == REC_LCD_FRAME:
-            display = rec.get("display", bytes(50))
-            assert len(display) == 50
+            display = rec.get("display", bytes(lcd_bytes))
+            assert len(display) == lcd_bytes
             buf.write(struct.pack("B", rtype))
             buf.write(struct.pack("<I", tick))
             buf.write(display)

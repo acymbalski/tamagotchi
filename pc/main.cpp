@@ -1076,10 +1076,12 @@ int main(int argc, char **argv) {
                         lastStreamTickMarkerTick = tick;
                     }
 
-                    /* LCD frame placeholder (~30fps) */
+                    /* LCD frame capture (~30fps): matrix_buffer (64 bytes) + icon_buffer (8 bytes) */
                     if (tick - lastStreamLcdFrameTick >= TICK_FREQUENCY / 30) {
-                        uint8_t lcdPlaceholder[50] = {0};
-                        g_streamCapture->logLcdFrame(tick, lcdPlaceholder);
+                        uint8_t lcdFrame[STREAM_LCD_BYTES];
+                        memcpy(lcdFrame, matrix_buffer, 64);       /* 16 rows * 4 bytes */
+                        memcpy(lcdFrame + 64, icon_buffer, 8);     /* 8 icon booleans */
+                        g_streamCapture->logLcdFrame(tick, lcdFrame);
                         lastStreamLcdFrameTick = tick;
                     }
                 }
