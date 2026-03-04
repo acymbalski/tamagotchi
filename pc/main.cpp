@@ -771,6 +771,13 @@ static int hal_handler(void) {
                 fflush(stdout);
                 break;
 
+            /* Toggle NTP time sync */
+            case SDLK_i:
+                ntpDisabled = !ntpDisabled;
+                printf("[ntp] %s\n", ntpDisabled ? "DISABLED" : "ENABLED");
+                fflush(stdout);
+                break;
+
             /* Space bar hold: 5x speed boost (works even when paused) */
             case SDLK_SPACE:
                 if (!spaceHeld) {
