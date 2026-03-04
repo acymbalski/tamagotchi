@@ -50,6 +50,8 @@ FIELD_COLORS = {
     "attention":     QColor(100, 180, 255),
     "lifecycle":     QColor(255, 255, 100),
     "character":     QColor(255, 150, 200),
+    "behavior_mistake": QColor(255, 50, 50),
+    "neglect":       QColor(255, 150, 0),
 }
 
 def _build_addr_color_map():
@@ -223,9 +225,23 @@ class MemoryGridWidget(QWidget):
         self._selected_addrs: set[int] = set()
         self._drag_start_addr: int | None = None
         self._dragging = False
+        self._addr_color_cache = self._build_addr_color_map()
         self._update_size()
         self.setMouseTracking(True)
         self.setStyleSheet("QToolTip { background-color: white; color: black; border: 1px solid #999; padding: 4px; }")
+
+    def _build_addr_color_map(self):
+        """Build {nibble_addr: (field_name, QColor)} from current memory_config.MAP."""
+        result = {}
+        for name, cfg in memory_config.MAP.items():
+            addr = cfg.get("addr")
+            if addr is None:
+                continue
+            color = FIELD_COLORS.get(name, QColor(120, 120, 120))
+            result[addr] = (name, color)
+            if cfg.get("type") == "bcd":
+                result[addr + 1] = (name, color)
+        return result
 
     def _update_size(self):
         # header + data rows + legend (2 lines)
@@ -1067,7 +1083,7 @@ class StreamViewer(QMainWindow):
 
         self.stats_labels = {}
         stat_names = ["hunger", "happy", "discipline", "weight", "age", "sick",
-                      "sleeping", "poop", "attention", "lifecycle", "character"]
+                      "sleeping", "poop", "attention", "lifecycle", "character", "behavior_mistake", "neglect"]
         for name in stat_names:
             lbl = QLabel(f"{name}: --")
             left_layout.addWidget(lbl)

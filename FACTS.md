@@ -115,3 +115,22 @@ The `tama_save.bin` file uses the following layout:
 ## Dangerous Nibble Ranges
 
 - `0x060–0x07F` — likely CPU call stack / runtime state. Writing fixed values here causes screen corruption and freeze. **Treat as read-only.**
+
+---
+
+## Evolution & Care
+
+### Care Mistakes
+There are two distinct types of care mistakes tracked by the ROM:
+
+1. **Neglect**
+   - **Address:** `0x042` (nibble)
+   - **Behavior:** Increments when an Attention call triggered by **Hunger** or **Happiness** hitting zero is ignored for 15 minutes.
+   - **Logic:** Incremented via saturated addition at ROM `0xFDF` (calls `0xFE8`).
+
+2. **Behavior Mistakes**
+   - **Address:** `0x051` (nibble)
+   - **Behavior:** Increments when an Attention call triggered by **Discipline** (Tama calls but stats are not zero) is ignored.
+   - **Logic:** Incremented via saturated addition at ROM `0xFD1` (calls `0xFE8`).
+
+- **Limits:** Both counters are single-nibble and capped at `15` (`0xF`).

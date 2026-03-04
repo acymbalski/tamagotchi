@@ -19,8 +19,9 @@
 
 // Addresses not yet discovered — 0x3FF is an out-of-bounds sentinel; reads/writes
 // will hit the bounds check in memory.cpp and safely no-op. Replace once confirmed.
-#define MEM_LOC_CHARACTER    0x3FF  // creature ID nibble — find via: analyzer.py --field stage (divergent runs)
-#define MEM_LOC_CARE_MISTAKES 0x3FF // neglect counter   — find via: delta analysis before/after hunger→0
+#define MEM_LOC_CHARACTER    0x050  // creature ID nibble
+#define MEM_LOC_BEHAVIOR_MISTAKE 0x051 // discipline calls ignored
+#define MEM_LOC_NEGLECT      0x042  // hunger/happy neglected
 
 #define MENU_NONE 0x0
 #define MENU_FOOD 0x1

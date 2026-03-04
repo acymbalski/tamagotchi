@@ -469,6 +469,14 @@ static void draw_stats_panel(void) {
     sprintf(buf, "%d/4", disc);
     STAT_ROW("DSC:", buf, 220, 220, 220);
 
+    uint8_t behavior = readMemory(MEM_LOC_BEHAVIOR_MISTAKE);
+    sprintf(buf, "%d", behavior);
+    STAT_ROW("BEH:", buf, behavior > 0 ? 255 : 220, behavior > 0 ? 50 : 220, behavior > 0 ? 50 : 220);
+
+    uint8_t neglect = readMemory(MEM_LOC_NEGLECT);
+    sprintf(buf, "%d", neglect);
+    STAT_ROW("NEG:", buf, neglect > 0 ? 255 : 150, neglect > 0 ? 150 : 220, neglect > 0 ? 0 : 220);
+
     {
         uint8_t sec_ones = readMemory(0x10);
         uint8_t sec_tens = readMemory(0x11);
