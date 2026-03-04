@@ -554,11 +554,33 @@ class SegmentedTamStream:
 
         # --- Phase 1: scan metadata for every segment ---
         self.segments: list[SegmentInfo] = []
+        global_offset = 0
+        prev_raw_end = None
+        
         for i, path in enumerate(seg_files):
             if progress_callback:
                 pct = int(i * 80 / len(seg_files))
                 progress_callback(pct, f"Scanning segment {i+1}/{len(seg_files)}...")
             info = self._scan_segment_metadata(path, i)
+            raw_start = info.start_tick
+            raw_end   = info.end_tick
+
+            # Inter-segment wrap: new seg starts far before previous seg ended
+            if prev_raw_end is not None:
+                if raw_start < prev_raw_end and (prev_raw_end - raw_start) > (1 << 31):
+                    global_offset += (1 << 32)
+
+            info.start_tick = raw_start + global_offset
+
+            # Intra-segment wrap: segment end wrapped around within this segment
+            if raw_end < raw_start and (raw_start - raw_end) > (1 << 31):
+                info.end_tick = raw_end + global_offset + (1 << 32)
+                global_offset += (1 << 32)   # next segment is in new epoch
+                prev_raw_end = raw_end
+            else:
+                info.end_tick = raw_end + global_offset
+                prev_raw_end = raw_end
+
             self.segments.append(info)
 
         # Sorted list of segment start ticks for binary search
@@ -573,12 +595,17 @@ class SegmentedTamStream:
         self._lcd_frame_index_all: list = []
 
         for seg in self.segments:
-            self._lcd_change_ticks.extend(seg.lcd_change_ticks)
-            self._annotation_records.extend(seg.annotation_records)
-            self._button_records.extend(seg.button_records)
-            self._tick_marker_ticks.extend(seg.tick_marker_ticks)
+            seg_offset = seg.start_tick - (seg.start_tick % (1 << 32))
+            
+            # Map segment-local ticks to monotonic global ticks
+            def _monot(t): return t + seg_offset
+
+            self._lcd_change_ticks.extend(map(_monot, seg.lcd_change_ticks))
+            self._annotation_records.extend([(t + seg_offset, txt) for t, txt in seg.annotation_records])
+            self._button_records.extend([(t + seg_offset, bid, s) for t, bid, s in seg.button_records])
+            self._tick_marker_ticks.extend(map(_monot, seg.tick_marker_ticks))
             for tick, offset in seg.lcd_frame_index:
-                self._lcd_frame_index_all.append((tick, seg.index, offset))
+                self._lcd_frame_index_all.append((tick + seg_offset, seg.index, offset))
 
         self._lcd_change_ticks.sort()
         self._annotation_records.sort(key=lambda x: x[0])
@@ -613,6 +640,10 @@ class SegmentedTamStream:
                 idx = self.segment_for_tick(tick)
                 if idx is not None and not self.segments[idx].loaded:
                     self.load_segment(idx)
+
+        if progress_callback:
+            n = sum(1 for s in self.segments if s.loaded)
+            progress_callback(100, f"Ready — {len(self.segments)} segments ({n} loaded)")
 
         if progress_callback:
             n = sum(1 for s in self.segments if s.loaded)
@@ -707,6 +738,23 @@ class SegmentedTamStream:
 
         return info
 
+    def _raw_to_ext_ticks(self, seg, raw_ticks):
+        """Convert a list of raw (monotone-within-segment) ticks to extended ticks.
+
+        Uses seg.start_tick (already extended after Bug-1 fix) to derive the epoch
+        base, then detects any intra-segment wrap via a large backward jump.
+        """
+        epoch_base = seg.start_tick - (seg.start_tick % (1 << 32))
+        extra = 0
+        prev_raw = None
+        result = []
+        for raw_tick in raw_ticks:
+            if prev_raw is not None and raw_tick < prev_raw - (1 << 31):
+                extra += (1 << 32)
+            prev_raw = raw_tick
+            result.append(epoch_base + extra + raw_tick)
+        return result
+
     # ------------------------------------------------------------------
     # Segment load / unload
     # ------------------------------------------------------------------
@@ -729,35 +777,44 @@ class SegmentedTamStream:
         seg.snapshot_count = len(seg.snapshot_positions)
         seg.lcd_frame_count = len(seg.lcd_frame_index)
 
-        # Populate metadata lists from the loaded stream
-        new_anns = list(seg.stream._annotation_records)
-        new_btns = list(seg.stream._button_records)
-        new_ticks = list(seg.stream._tick_marker_ticks)
-        new_lcdc = list(seg.stream._lcd_change_ticks)
+        # Populate metadata lists from the loaded stream — convert raw ticks to extended
+        raw_anns  = list(seg.stream._annotation_records)   # [(raw_tick, text), ...]
+        raw_btns  = list(seg.stream._button_records)        # [(raw_tick, bid, state), ...]
+        raw_ticks = list(seg.stream._tick_marker_ticks)     # [raw_tick, ...]
+        raw_lcdc  = list(seg.stream._lcd_change_ticks)      # [raw_tick, ...]
+
+        ext_ticks = self._raw_to_ext_ticks(seg, raw_ticks)
+        ext_lcdc  = self._raw_to_ext_ticks(seg, raw_lcdc)
+        ext_anns  = [(et, txt) for et, (_, txt) in
+                     zip(self._raw_to_ext_ticks(seg, [t for t, _ in raw_anns]), raw_anns)]
+        ext_btns  = [(et, bid, s) for et, (_, bid, s) in
+                     zip(self._raw_to_ext_ticks(seg, [t for t, _, _ in raw_btns]), raw_btns)]
 
         # Merge into global sorted lists (only records not already present)
-        if new_anns and not seg.annotation_records:
-            seg.annotation_records = new_anns
-            for item in new_anns:
-                bisect.insort(self._annotation_records, item)
-        if new_btns and not seg.button_records:
-            seg.button_records = new_btns
-            for item in new_btns:
-                bisect.insort(self._button_records, item)
-        if new_ticks and not seg.tick_marker_ticks:
-            seg.tick_marker_ticks = new_ticks
-            for t in new_ticks:
+        if ext_ticks and not seg.tick_marker_ticks:
+            seg.tick_marker_ticks = ext_ticks
+            for t in ext_ticks:
                 bisect.insort(self._tick_marker_ticks, t)
-        if new_lcdc and not seg.lcd_change_ticks:
-            seg.lcd_change_ticks = new_lcdc
-            for t in new_lcdc:
+        if ext_lcdc and not seg.lcd_change_ticks:
+            seg.lcd_change_ticks = ext_lcdc
+            for t in ext_lcdc:
                 bisect.insort(self._lcd_change_ticks, t)
+        if ext_anns and not seg.annotation_records:
+            seg.annotation_records = ext_anns
+            for item in ext_anns:
+                bisect.insort(self._annotation_records, item)
+        if ext_btns and not seg.button_records:
+            seg.button_records = ext_btns
+            for item in ext_btns:
+                bisect.insort(self._button_records, item)
 
-        # Insert into shared snapshot / LCD indices (sorted by tick)
-        for tick, offset in seg.snapshot_positions:
-            bisect.insort(self._snapshot_positions, (tick, (index, offset)))
-        for tick, offset in seg.lcd_frame_index:
-            bisect.insort(self._lcd_frame_index, (tick, (index, offset)))
+        # Insert into shared snapshot / LCD indices with extended ticks
+        ext_snap_ticks = self._raw_to_ext_ticks(seg, [t for t, _ in seg.snapshot_positions])
+        for ext_tick, (_, offset) in zip(ext_snap_ticks, seg.snapshot_positions):
+            bisect.insort(self._snapshot_positions, (ext_tick, (index, offset)))
+        ext_lcd_ticks = self._raw_to_ext_ticks(seg, [t for t, _ in seg.lcd_frame_index])
+        for ext_tick, (_, offset) in zip(ext_lcd_ticks, seg.lcd_frame_index):
+            bisect.insort(self._lcd_frame_index, (ext_tick, (index, offset)))
 
     def unload_segment(self, index: int):
         """Unload a segment, freeing its decompressed data; keep metadata."""
@@ -806,28 +863,19 @@ class SegmentedTamStream:
     def segment_for_tick(self, tick: int) -> Optional[int]:
         """Return the segment index whose range contains tick, or nearest.
 
-        Uses linear search with 32-bit wraparound-aware distance so it works
-        even when the tick counter wraps around within the recording.
+        Extended ticks are monotonically increasing after Bug-1 fix, so a simple
+        range check and absolute-distance fallback are sufficient.
         """
         if not self.segments:
             return None
-        # First pass: exact range match (handles normal and wraparound segments)
         for i, seg in enumerate(self.segments):
-            if seg.end_tick >= seg.start_tick:
-                if seg.start_tick <= tick <= seg.end_tick:
-                    return i
-            else:
-                # Segment spans a 32-bit wraparound; tick valid above start OR below end
-                if tick >= seg.start_tick or tick <= seg.end_tick:
-                    return i
-        # Second pass: nearest by 32-bit-wraparound distance to segment midpoint
+            if seg.start_tick <= tick <= seg.end_tick:
+                return i
+        # Fallback: nearest segment midpoint by absolute distance
         best_idx, best_dist = 0, None
-        half = 1 << 31
         for i, seg in enumerate(self.segments):
             mid = (seg.start_tick + seg.end_tick) // 2
-            d = (tick - mid) & 0xFFFFFFFF
-            if d > half:
-                d = (1 << 32) - d
+            d = abs(tick - mid)
             if best_dist is None or d < best_dist:
                 best_dist, best_idx = d, i
         return best_idx
@@ -900,32 +948,30 @@ class SegmentedTamStream:
     def nearest_lcd_frame(self, target_tick: int, seg_idx: int = None):
         """Return (tick, frame_bytes) closest to target, or None if unloaded.
 
-        If seg_idx is given, restricts the search to that segment (faster and
-        correct when the caller knows the current segment — avoids ambiguity
-        from 32-bit tick wraparound).  Otherwise performs a linear search over
-        all loaded segments using wraparound-aware distance.
+        target_tick is an extended (monotone) tick. If seg_idx is given,
+        restricts the search to that segment. Otherwise performs a linear search
+        over all loaded segments using absolute extended-tick distance.
         """
-        half = 1 << 31
-
-        def _wrap_dist(a, b):
-            d = (a - b) & 0xFFFFFFFF
-            return d if d <= half else (1 << 32) - d
+        raw_target = target_tick & 0xFFFFFFFF  # strip epoch for inner TamStream lookup
 
         if seg_idx is not None:
             seg = self.segments[seg_idx]
             if not seg.loaded or not seg.stream:
                 return None
-            return seg.stream.nearest_lcd_frame(target_tick)
+            return seg.stream.nearest_lcd_frame(raw_target)
 
-        # Linear search over loaded segments — O(N_loaded), correct for wrapped ticks
+        # Linear search over loaded segments using extended-tick distance
         best_dist, best_result = None, None
         for seg in self.segments:
             if not seg.loaded or not seg.stream:
                 continue
-            frame = seg.stream.nearest_lcd_frame(target_tick)
+            frame = seg.stream.nearest_lcd_frame(raw_target)
             if frame is None:
                 continue
-            d = _wrap_dist(frame[0], target_tick)
+            # Convert raw frame tick back to extended for distance comparison
+            seg_epoch = seg.start_tick - (seg.start_tick % (1 << 32))
+            ext_frame_tick = seg_epoch + frame[0]
+            d = abs(ext_frame_tick - target_tick)
             if best_dist is None or d < best_dist:
                 best_dist, best_result = d, frame
         return best_result
@@ -1065,7 +1111,15 @@ class CachedStateTracker:
                 if not seg.loaded or not seg.stream:
                     continue
                 seg_write_start = len(writes)
+                epoch_base = seg.start_tick - (seg.start_tick % (1 << 32))
+                extra = 0
+                prev_raw = None
                 for rec_type, tick, data in seg.stream.records():
+                    # Convert raw tick to extended
+                    if prev_raw is not None and tick < prev_raw - (1 << 31):
+                        extra += (1 << 32)
+                    prev_raw = tick
+                    ext_tick = epoch_base + extra + tick
                     if rec_type in (REC_ROM_WRITE, REC_BABYSITTER_WRITE):
                         addr = data["addr"]
                         new_val = data["value"]
@@ -1074,7 +1128,7 @@ class CachedStateTracker:
                             if old_val is not None:
                                 source = 0 if rec_type == REC_ROM_WRITE else 1
                                 func_id = data.get("func_id", 0)
-                                writes.append((tick, addr, new_val, old_val, source, func_id))
+                                writes.append((ext_tick, addr, new_val, old_val, source, func_id))
                     elif rec_type == REC_RAM_SNAPSHOT:
                         running_ram = bytearray(data["memory"])
                     count += 1
@@ -1143,9 +1197,16 @@ class CachedStateTracker:
                 _, addr, new_val, *_ = self._writes[i]
                 _, running_ram = self._apply_write_to_ram(running_ram, addr, new_val)
 
-        # Process this segment's records
+        # Process this segment's records — convert raw ticks to extended
         new_writes = []
+        epoch_base = seg.start_tick - (seg.start_tick % (1 << 32))
+        extra = 0
+        prev_raw = None
         for rec_type, tick, data in seg.stream.records():
+            if prev_raw is not None and tick < prev_raw - (1 << 31):
+                extra += (1 << 32)
+            prev_raw = tick
+            ext_tick = epoch_base + extra + tick
             if rec_type in (REC_ROM_WRITE, REC_BABYSITTER_WRITE):
                 addr = data["addr"]
                 new_val = data["value"]
@@ -1154,7 +1215,7 @@ class CachedStateTracker:
                     if old_val is not None:
                         source = 0 if rec_type == REC_ROM_WRITE else 1
                         func_id = data.get("func_id", 0)
-                        new_writes.append((tick, addr, new_val, old_val, source, func_id))
+                        new_writes.append((ext_tick, addr, new_val, old_val, source, func_id))
             elif rec_type == REC_RAM_SNAPSHOT:
                 running_ram = bytearray(data["memory"])
 

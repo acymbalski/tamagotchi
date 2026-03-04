@@ -66,8 +66,13 @@ static void init_captures_dir() {
 #define CAPTURES_DIR g_capturesDir
 
 /* ---- Global state ---- */
-static bool_t matrix_buffer[LCD_HEIGHT][LCD_WIDTH / 8] = {{0}};
-static bool_t icon_buffer[ICON_NUM] = {0};
+static struct {
+    bool_t matrix[LCD_HEIGHT][LCD_WIDTH / 8];
+    bool_t icons[ICON_NUM];
+} lcd_state = {0};
+#define matrix_buffer lcd_state.matrix
+#define icon_buffer   lcd_state.icons
+
 static uint32_t current_freq = 0;
 static bool isPaused = false;
 
@@ -938,11 +943,11 @@ static void process_headless_stdin() {
 #endif
     } else if (_strnicmp(line, "SAVE ", 5) == 0) {
         cpu_get_state(&cpuState);
-        pc_save_state_to_file(&cpuState, line + 5);
+        pc_save_state_to_file(&cpuState, line + 5, &lcd_state, sizeof(lcd_state));
         printf("[save] %s\n", line + 5);
         fflush(stdout);
     } else if (_strnicmp(line, "LOAD ", 5) == 0) {
-        if (pc_load_state_from_file(&cpuState, line + 5)) {
+        if (pc_load_state_from_file(&cpuState, line + 5, &lcd_state, sizeof(lcd_state))) {
             cpu_sync_ref_timestamp();
             printf("[load] %s\n", line + 5);
         } else {
@@ -1045,9 +1050,9 @@ int main(int argc, char **argv) {
 
     /* Try loading a saved state */
     if (loadStatePath[0] != '\0') {
-        pc_load_state_from_file(&cpuState, loadStatePath);
+        pc_load_state_from_file(&cpuState, loadStatePath, &lcd_state, sizeof(lcd_state));
     } else {
-        pc_load_state(&cpuState);
+        pc_load_state(&cpuState, &lcd_state, sizeof(lcd_state));
     }
 
     if (speedIndex != 0) {
@@ -1194,7 +1199,7 @@ int main(int argc, char **argv) {
         uint64_t now = SDL_GetTicks64();
         if (now - lastSaveMs > 2ULL * 60ULL * 1000ULL) {
             lastSaveMs = now;
-            pc_save_state(&cpuState);
+            pc_save_state(&cpuState, &lcd_state, sizeof(lcd_state));
         }
     }
 
@@ -1209,16 +1214,16 @@ int main(int argc, char **argv) {
 
     if (saveOnExitPath[0] != '\0') {
         cpu_get_state(&cpuState);
-        pc_save_state_to_file(&cpuState, saveOnExitPath);
+        pc_save_state_to_file(&cpuState, saveOnExitPath, &lcd_state, sizeof(lcd_state));
         printf("[save] %s\n", saveOnExitPath);
     }
 
     if (!headlessMode) {
-        pc_save_state(&cpuState);
+        pc_save_state(&cpuState, &lcd_state, sizeof(lcd_state));
         SDL_DestroyRenderer(renderer);
         SDL_DestroyWindow(window);
     } else {
-        if (saveOnExitPath[0] == '\0') pc_save_state(&cpuState);
+        if (saveOnExitPath[0] == '\0') pc_save_state(&cpuState, &lcd_state, sizeof(lcd_state));
         printf("[exit] reason=%s\n", headlessDurationEmuSec > 0 ? "duration" : "quit");
     }
     fflush(stdout);

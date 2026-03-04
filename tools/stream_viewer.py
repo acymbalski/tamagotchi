@@ -433,6 +433,76 @@ class MemoryGridWidget(QWidget):
 
 
 # ===========================================================================
+# StackViewerWidget
+# ===========================================================================
+
+class StackViewerWidget(QWidget):
+    """Decodes and displays the CPU call stack from RAM (0x0C0-0x0FF)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._ram = bytes(320)
+        self._font = QFont("Consolas", 10)
+        self._font.setStyleHint(QFont.StyleHint.Monospace)
+        self.setMinimumWidth(180)
+        self.setStyleSheet("background-color: #1a1a1a; color: #00ff00; border: 1px solid #444;")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(2)
+
+        header = QLabel("CALL STACK")
+        header.setStyleSheet("font-weight: bold; color: #888; border: none;")
+        layout.addWidget(header)
+
+        self.list_label = QLabel("")
+        self.list_label.setFont(self._font)
+        self.list_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.list_label.setStyleSheet("border: none; color: #44ff44;")
+        layout.addWidget(self.list_label)
+        layout.addStretch()
+
+    def set_state(self, ram):
+        self._ram = ram
+        self.update_stack()
+
+    def update_stack(self):
+        # Stack grows down from 0x0FF. Entries are 3 nibbles: [PCP, PCSH, PCSL]
+        # According to cpu.c:
+        # SET_M(sp-1, PCP)
+        # SET_M(sp-2, PCSH)
+        # SET_M(sp-3, PCSL)
+        # If we assume SP starts at 0 (or wraps), the first entry is at 0xFF, 0xFE, 0xFD.
+        
+        lines = []
+        for i in range(255, 0x0C0, -3):
+            if i - 2 < 0x0C0:
+                break
+            
+            def get_nibble(addr):
+                byte_idx = addr >> 1
+                if byte_idx >= len(self._ram): return 0
+                val = self._ram[byte_idx]
+                return ((val & 0xF0) >> 4) if (addr & 1) == 0 else (val & 0x0F)
+            
+            pcp  = get_nibble(i)
+            pcsh = get_nibble(i-1)
+            pcsl = get_nibble(i-2)
+            
+            addr = (pcp << 8) | (pcsh << 4) | pcsl
+            if addr == 0 and i < 252: # Stop at first empty if not the first slot
+                break
+                
+            depth = (255 - i) // 3
+            lines.append(f"#{depth:02d} [0x{i:02X}] -> 0x{addr:03X}")
+            
+        if not lines:
+            self.list_label.setText("(empty)")
+        else:
+            self.list_label.setText("\n".join(lines))
+
+
+# ===========================================================================
 # TimelineWidget
 # ===========================================================================
 
@@ -1003,6 +1073,10 @@ class StreamViewer(QMainWindow):
             left_layout.addWidget(lbl)
             self.stats_labels[name] = lbl
 
+        # Stack viewer
+        self.stack_viewer = StackViewerWidget()
+        left_layout.addWidget(self.stack_viewer)
+
         # Annotation list
         self.annotation_list_label = QLabel("Nearby annotations:")
         self.annotation_list_label.setStyleSheet("font-weight: bold; font-size: 11px;")
@@ -1338,7 +1412,7 @@ class StreamViewer(QMainWindow):
     # --- Display update ---
 
     def _update_display(self, custom_diff=None):
-        self.tick_label.setText(f"Tick: {self.current_tick:,}")
+        self.tick_label.setText(f"Tick: {self.current_tick & 0xFFFFFFFF:,}")
         emu_time = (self.current_tick - self.min_tick) / TICK_FREQUENCY
         self.time_label.setText(f"Time: {emu_time:.1f}s")
 
@@ -1366,6 +1440,9 @@ class StreamViewer(QMainWindow):
         except Exception as e:
             for lbl in self.stats_labels.values():
                 lbl.setText(f"Error: {e}")
+
+        # Update stack viewer
+        self.stack_viewer.set_state(ram)
 
         # Hex grid with diff
         diff = custom_diff if custom_diff is not None else self.tracker.last_diff
@@ -1420,17 +1497,33 @@ class StreamViewer(QMainWindow):
     # --- Segment load / unload (right-click from timeline) ---
 
     def _on_load_segment(self, seg_index):
-        """Spawn a background worker to load a segment; update UI on completion."""
+        """Spawn a background worker to load a segment with a progress dialog."""
         if not isinstance(self.stream, SegmentedTamStream):
             return
         if self.stream.is_segment_loaded(seg_index):
             return
+
+        progress = QProgressDialog(f"Loading segment {seg_index}...", "Cancel", 0, 100, self)
+        progress.setWindowTitle("Segment Loading")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+
         worker = SegmentLoadWorker(self.stream, seg_index, self)
+        worker.finished.connect(lambda: progress.close())
         worker.finished.connect(self._on_segment_load_finished)
-        worker.progress.connect(lambda pct, msg: self.nav_bar.status_label.setText(
-            f"Loading seg {seg_index}: {msg}"))
+        
+        def update_progress(pct, msg):
+            progress.setValue(pct)
+            progress.setLabelText(f"Seg {seg_index}: {msg}")
+            if progress.wasCanceled():
+                # We don't have a good way to kill the thread mid-load safely here,
+                # but we can stop updating the UI.
+                pass
+
+        worker.progress.connect(update_progress)
         worker.start()
-        # Keep reference to prevent GC
+        
         if not hasattr(self, '_segment_workers'):
             self._segment_workers = []
         self._segment_workers.append(worker)
@@ -1544,10 +1637,14 @@ class StreamViewer(QMainWindow):
         """Build a 385-byte savestate: 1 byte magic + 64 bytes cpu_state_t + 320 bytes RAM."""
         magic = b'\x12'
         # cpu_state_t is 64 bytes, mostly zeros
+        # Offset 0: pc (uint16) -> TO_PC(0, 1, 0) = 0x0100
+        # Offset 8: np (uint8) -> TO_NP(0, 1) = 0x01
         # Offset 12: tick_counter (uint32)
         # Offset 16: clk_timer_timestamp (uint32)
         # Offset 20: prog_timer_timestamp (uint32)
         cpu_state = bytearray(64)
+        struct.pack_into("<H", cpu_state, 0, 0x0100)
+        struct.pack_into("<B", cpu_state, 8, 0x01)
         struct.pack_into("<I", cpu_state, 12, tick)
         struct.pack_into("<I", cpu_state, 16, tick)
         struct.pack_into("<I", cpu_state, 20, tick)
@@ -1557,6 +1654,16 @@ class StreamViewer(QMainWindow):
         ram = self.tracker.ram
         tick = self.current_tick
         savestate = self._build_savestate_bytes(ram, tick)
+
+        # Append LCD frame data if available (72 bytes: 64 matrix + 8 icons)
+        seg_idx = self.tracker.current_segment_idx
+        if isinstance(self.stream, SegmentedTamStream):
+            frame = self.stream.nearest_lcd_frame(self.current_tick, seg_idx=seg_idx)
+        else:
+            frame = self.stream.nearest_lcd_frame(self.current_tick)
+        
+        if frame and len(frame[1]) >= 72:
+            savestate += frame[1][:72]
 
         # Find the exe relative to project root
         project_root = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))

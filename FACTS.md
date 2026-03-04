@@ -81,6 +81,37 @@ Death transition: `9 → 1` directly (Adult → Baby). `isTamaEgg()` never fires
 
 ---
 
+## CPU Initial State & Savestate Layout
+
+Confirmed from `src/cpu.c` (`cpu_reset`) and `src/cpu.h` (`cpu_state_t`).
+
+### Initial Register Values
+| Register | Value | Macro / Reference |
+|----------|-------|-------------------|
+| **PC**   | `0x0100` | `TO_PC(0, 1, 0x00)` |
+| **NP**   | `0x01`   | `TO_NP(0, 1)` |
+| **SP**   | `0x00`   | (undefined/initial) |
+| **A, B, X, Y** | `0x00` | (undefined/initial) |
+| **Flags**| `0x00`   | |
+
+### TO_PC Macro
+```c
+#define TO_PC(bank, page, step)  ((step & 0xFF) | ((page & 0xF) << 8) | ((bank & 0x1) << 12))
+```
+- **Bank 0, Page 1, Step 0** = `0x0100` (The standard ROM entry point)
+- **Bank 0, Page 0, Step 0** = `0x0000` (Incorrect for starting the game)
+
+### Savestate Layout (PC Simulator)
+The `tama_save.bin` file uses the following layout:
+1. **Magic Byte**: `0x12` (1 byte)
+2. **CPU State**: `cpu_state_t` struct (64 bytes on x64)
+3. **RAM**: 320 bytes (unpacked nibbles, 1 per byte)
+4. **Extra Data (Optional)**: `lcd_state_t` (72 bytes: 64 matrix + 8 icons)
+
+**Note**: When building a savestate manually (e.g., in `stream_viewer.py`), the `PC` must be set to `0x0100` and `NP` to `0x01` to ensure the ROM executes from the correct entry point.
+
+---
+
 ## Dangerous Nibble Ranges
 
 - `0x060–0x07F` — likely CPU call stack / runtime state. Writing fixed values here causes screen corruption and freeze. **Treat as read-only.**

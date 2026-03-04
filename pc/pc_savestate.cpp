@@ -6,7 +6,7 @@
 #define SAVE_MAGIC    0x12
 #define SAVE_FILENAME "tama_save.bin"
 
-void pc_save_state_to_file(cpu_state_t *state, const char *filename) {
+void pc_save_state_to_file(cpu_state_t *state, const char *filename, void *extra, size_t extra_size) {
     cpu_get_state(state);
 
     FILE *f = fopen(filename, "wb");
@@ -25,22 +25,33 @@ void pc_save_state_to_file(cpu_state_t *state, const char *filename) {
     /* Save the nibble array that memory points to */
     fwrite(state->memory, sizeof(u4_t), MEMORY_SIZE, f);
 
+    /* Save extra data if provided */
+    if (extra && extra_size > 0) {
+        fwrite(extra, extra_size, 1, f);
+        printf("[savestate] Saved %zu bytes of extra data\n", extra_size);
+    }
+
     fclose(f);
     printf("[savestate] State saved to %s\n", filename);
     fflush(stdout);
 }
 
-void pc_save_state(cpu_state_t *state) {
-    pc_save_state_to_file(state, SAVE_FILENAME);
+void pc_save_state(cpu_state_t *state, void *extra, size_t extra_size) {
+    pc_save_state_to_file(state, SAVE_FILENAME, extra, extra_size);
 }
 
-bool pc_load_state_from_file(cpu_state_t *state, const char *filename) {
+bool pc_load_state_from_file(cpu_state_t *state, const char *filename, void *extra, size_t extra_size) {
     FILE *f = fopen(filename, "rb");
     if (!f) {
         printf("[savestate] No save file found (%s)\n", filename);
         fflush(stdout);
         return false;
     }
+
+    /* Check file size for extra data */
+    fseek(f, 0, SEEK_END);
+    long filesize = ftell(f);
+    fseek(f, 0, SEEK_SET);
 
     uint8_t magic = 0;
     fread(&magic, 1, 1, f);
@@ -63,6 +74,14 @@ bool pc_load_state_from_file(cpu_state_t *state, const char *filename) {
 
     fread(state->memory, sizeof(u4_t), MEMORY_SIZE, f);
 
+    /* Read extra data if it exists and buffer is provided */
+    long base_size = 1 + sizeof(cpu_state_t) + MEMORY_SIZE;
+    if (extra && extra_size > 0 && filesize >= (long)(base_size + extra_size)) {
+        fseek(f, base_size, SEEK_SET);
+        fread(extra, extra_size, 1, f);
+        printf("[savestate] Loaded %zu bytes of extra data\n", extra_size);
+    }
+
     fclose(f);
 
     cpu_set_state(state);
@@ -72,8 +91,8 @@ bool pc_load_state_from_file(cpu_state_t *state, const char *filename) {
     return true;
 }
 
-bool pc_load_state(cpu_state_t *state) {
-    return pc_load_state_from_file(state, SAVE_FILENAME);
+bool pc_load_state(cpu_state_t *state, void *extra, size_t extra_size) {
+    return pc_load_state_from_file(state, SAVE_FILENAME, extra, extra_size);
 }
 
 void pc_delete_save(void) {

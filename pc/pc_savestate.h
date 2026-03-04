@@ -8,10 +8,10 @@
  *   Remaining:           MEMORY_SIZE nibble bytes
  */
 
-void pc_save_state(cpu_state_t *state);
-bool pc_load_state(cpu_state_t *state);
+void pc_save_state(cpu_state_t *state, void *extra = nullptr, size_t extra_size = 0);
+bool pc_load_state(cpu_state_t *state, void *extra = nullptr, size_t extra_size = 0);
 void pc_delete_save(void);
 
 // New functions for specific investigation snapshots
-void pc_save_state_to_file(cpu_state_t *state, const char *filename);
-bool pc_load_state_from_file(cpu_state_t *state, const char *filename);
+void pc_save_state_to_file(cpu_state_t *state, const char *filename, void *extra = nullptr, size_t extra_size = 0);
+bool pc_load_state_from_file(cpu_state_t *state, const char *filename, void *extra = nullptr, size_t extra_size = 0);
