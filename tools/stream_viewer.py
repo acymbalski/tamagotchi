@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from stream_reader import (
-    TamStream, CachedStateTracker, open_stream,
+    TamStream, SegmentedTamStream, CachedStateTracker, open_stream,
     REC_ANNOTATION, REC_BUTTON_EVENT, REC_TICK_MARKER,
     BUTTON_NAMES, BUTTON_STATES,
 )
@@ -27,7 +27,7 @@ from PyQt6.QtWidgets import (
     QInputDialog,
 )
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QFontMetrics
-from PyQt6.QtCore import Qt, QTimer, QPoint
+from PyQt6.QtCore import Qt, QTimer, QPoint, QThread, pyqtSignal
 
 TICK_FREQUENCY = 32768
 
@@ -451,6 +451,11 @@ class TimelineWidget(QWidget):
         self._stream = None
         self._lcd_popup = None
         self._last_popup_tick = None
+        # Segment load state: list of (start_tick, end_tick, is_loaded)
+        self._segments = []
+        # Callbacks for right-click load/unload (set by StreamViewer)
+        self._on_load_segment = None
+        self._on_unload_segment = None
 
     def set_range(self, min_tick, max_tick):
         self.min_tick = min_tick
@@ -468,11 +473,29 @@ class TimelineWidget(QWidget):
     def set_click_callback(self, callback):
         self._on_tick_clicked = callback
 
+    def set_segments(self, segments):
+        """segments: list of (start_tick, end_tick, is_loaded) tuples."""
+        self._segments = list(segments)
+        self.update()
+
+    def update_segment_loaded(self, index, loaded):
+        if 0 <= index < len(self._segments):
+            s, e, _ = self._segments[index]
+            self._segments[index] = (s, e, loaded)
+            self.update()
+
     def tick_from_x(self, x):
         span = self.max_tick - self.min_tick
         if span <= 0 or self.width() <= 0:
             return self.min_tick
         return int(self.min_tick + (x / self.width()) * span)
+
+    def _seg_index_at_tick(self, tick):
+        """Return segment index whose range contains tick, or None."""
+        for i, (s, e, _loaded) in enumerate(self._segments):
+            if s <= tick <= e:
+                return i
+        return None
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and self._on_tick_clicked:
@@ -487,14 +510,20 @@ class TimelineWidget(QWidget):
             f"Tick: {tick:,}\nTime: {emu_time:.2f}s",
             self,
         )
-        # LCD popup
+        # LCD popup — only show if tick's segment is loaded
         if self._stream and self._lcd_popup:
             if self._last_popup_tick is None or abs(tick - self._last_popup_tick) > 500:
-                frame = self._stream.nearest_lcd_frame(tick)
-                if frame:
-                    self._lcd_popup.update_frame(frame[0], frame[1], self.min_tick)
-                else:
+                seg_idx = self._seg_index_at_tick(tick)
+                if self._segments and seg_idx is not None and not self._segments[seg_idx][2]:
+                    # Unloaded segment
                     self._lcd_popup.update_frame(tick, None, self.min_tick)
+                    self._lcd_popup._tick_label.setText("Segment not loaded")
+                else:
+                    frame = self._stream.nearest_lcd_frame(tick)
+                    if frame:
+                        self._lcd_popup.update_frame(frame[0], frame[1], self.min_tick)
+                    else:
+                        self._lcd_popup.update_frame(tick, None, self.min_tick)
                 self._last_popup_tick = tick
             gpos = event.globalPosition().toPoint()
             self._lcd_popup.move(gpos.x() + 10, gpos.y() - self._lcd_popup.height() - 5)
@@ -504,6 +533,23 @@ class TimelineWidget(QWidget):
         if self._lcd_popup:
             self._lcd_popup.hide()
             self._last_popup_tick = None
+
+    def contextMenuEvent(self, event):
+        if not self._segments:
+            return
+        tick = self.tick_from_x(event.pos().x())
+        seg_idx = self._seg_index_at_tick(tick)
+        if seg_idx is None:
+            return
+        _s, _e, is_loaded = self._segments[seg_idx]
+        menu = QMenu(self)
+        if is_loaded:
+            action = menu.addAction(f"Unload segment {seg_idx}")
+            action.triggered.connect(lambda: self._on_unload_segment and self._on_unload_segment(seg_idx))
+        else:
+            action = menu.addAction(f"Load segment {seg_idx}")
+            action.triggered.connect(lambda: self._on_load_segment and self._on_load_segment(seg_idx))
+        menu.exec(event.globalPos())
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -516,7 +562,25 @@ class TimelineWidget(QWidget):
             painter.end()
             return
 
-        # Draw markers in priority order: buttons (subtle) first, then annotations/bookmarks on top
+        # --- 1. Segment rectangles ---
+        for start_t, end_t, is_loaded in self._segments:
+            x0 = int((start_t - self.min_tick) / span * w)
+            x1 = int((end_t - self.min_tick) / span * w)
+            seg_w = max(1, x1 - x0)
+            if is_loaded:
+                painter.fillRect(x0, 0, seg_w, h, QColor(40, 80, 140, 255))
+            else:
+                painter.fillRect(x0, 0, seg_w, h, QColor(40, 80, 140, 60))
+
+        # --- 2. Segment boundary lines ---
+        if self._segments:
+            painter.setPen(QPen(QColor(80, 80, 80), 1))
+            for start_t, end_t, _ in self._segments:
+                for t in (start_t, end_t):
+                    x = int((t - self.min_tick) / span * w)
+                    painter.drawLine(x, 0, x, h)
+
+        # --- 3. Markers: buttons (subtle) first, then annotations/bookmarks on top ---
         button_markers = []
         other_markers = []
         for marker in self.markers:
@@ -526,7 +590,6 @@ class TimelineWidget(QWidget):
             else:
                 other_markers.append(marker)
 
-        # Button events: small ticks at bottom/top edges, semi-transparent
         for tick, color, label, style in button_markers:
             x = int((tick - self.min_tick) / span * w)
             muted = QColor(color.red(), color.green(), color.blue(), 100)
@@ -536,7 +599,6 @@ class TimelineWidget(QWidget):
             else:
                 painter.drawLine(x, 0, x, 5)
 
-        # Annotations and bookmarks: full-height prominent lines
         for marker in other_markers:
             tick = marker[0]
             color = marker[1]
@@ -546,18 +608,20 @@ class TimelineWidget(QWidget):
             painter.setPen(QPen(color, 1 if style != "tall_line" else 2))
             painter.drawLine(x, h - line_h, x, h)
 
-        # Current position
+        # --- 4. Current position cursor ---
         cx = int((self.current_tick - self.min_tick) / span * w)
         painter.setPen(QPen(QColor(255, 255, 0), 2))
         painter.drawLine(cx, 0, cx, h)
 
-        # Legend at right edge
+        # --- 5. Legend ---
         font = QFont("Consolas", 7)
         font.setStyleHint(QFont.StyleHint.Monospace)
         painter.setFont(font)
         painter.setPen(QColor(120, 120, 120))
-        painter.drawText(4, 2, w - 8, 12, Qt.AlignmentFlag.AlignLeft,
-                         "Timeline — yellow: cursor | pink: bookmarks | red: annotations | green: buttons")
+        legend = "Timeline — yellow: cursor | pink: bookmarks | red: annotations | green: buttons"
+        if self._segments:
+            legend += " | blue: loaded segs"
+        painter.drawText(4, 2, w - 8, 12, Qt.AlignmentFlag.AlignLeft, legend)
 
         painter.end()
 
@@ -580,6 +644,14 @@ class HelpOverlay(QWidget):
     Home / End           Jump to start / end
     Space                Play / Pause auto-step
 
+  Buttons (Nav bar)
+    <1s / 1s>            Jump ±1 second
+    <1m / 1m>            Jump ±1 minute
+    <5m / 5m>            Jump ±5 minutes
+    <LCD / LCD>          Prev / Next LCD screen change
+    <Sel / Sel>          Prev / Next write to selected addrs
+    Right-click timeline Load / Unload segment
+
   Tools
     A                    Annotate current tick
     B                    Toggle bookmark
@@ -596,7 +668,6 @@ class HelpOverlay(QWidget):
 
   Hex Grid
     Click                Select address
-    Ctrl+Click           Toggle address in selection
     Drag                 Select rectangular region
     Hover                Show address, field name, value
     Red-bordered cells = danger zone (CPU stack)
@@ -649,92 +720,148 @@ class HelpOverlay(QWidget):
 # ===========================================================================
 
 class NavigationBar(QWidget):
-    """Navigation controls with buttons, slider, and status line."""
+    """Navigation controls with buttons, slider, and status line.
+
+    Layout:
+      Row 1: slider (full width)
+      Row 2: [|<] [Play] [>|] | [<1] [1>] [<10] [10>] | [<1s] [1s>] [<1m] [1m>] [<5m] [5m>]
+              | [<LCD] [LCD>] | [<Sel] [Sel>] | [+Bk] [<Bk] [Bk>]  (stretch)
+      Row 3: status label
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
 
-        btn_row = QHBoxLayout()
-        self.btn_home = QPushButton("|<")
-        self.btn_back_1s = QPushButton("<<")
-        self.btn_back_10 = QPushButton("<10")
-        self.btn_back_1 = QPushButton("<")
+        # --- Row 1: slider ---
         self.slider = QSlider(Qt.Orientation.Horizontal)
-        self.btn_fwd_1 = QPushButton(">")
-        self.btn_fwd_10 = QPushButton("10>")
-        self.btn_fwd_1s = QPushButton(">>")
-        self.btn_end = QPushButton(">|")
-        self.btn_play = QPushButton("Play")
-
-        self.btn_home.setToolTip("Jump to start  [Home]")
-        self.btn_back_1s.setToolTip("Back 1 second  [Ctrl+Left]")
-        self.btn_back_10.setToolTip("Back 10 writes  [Shift+Left]")
-        self.btn_back_1.setToolTip("Back 1 write  [Left]")
-        self.btn_fwd_1.setToolTip("Forward 1 write  [Right]")
-        self.btn_fwd_10.setToolTip("Forward 10 writes  [Shift+Right]")
-        self.btn_fwd_1s.setToolTip("Forward 1 second  [Ctrl+Right]")
-        self.btn_end.setToolTip("Jump to end  [End]")
-        self.btn_play.setToolTip("Play / Pause auto-step  [Space]")
-        self.slider.setToolTip("Scrub through tick markers")
-
-        for btn in [self.btn_home, self.btn_back_1s, self.btn_back_10, self.btn_back_1]:
-            btn.setFixedWidth(36)
-            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            btn_row.addWidget(btn)
         self.slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        btn_row.addWidget(self.slider, stretch=1)
-        for btn in [self.btn_fwd_1, self.btn_fwd_10, self.btn_fwd_1s, self.btn_end]:
-            btn.setFixedWidth(36)
-            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            btn_row.addWidget(btn)
-        self.btn_play.setFixedWidth(50)
-        self.btn_play.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        btn_row.addWidget(self.btn_play)
+        self.slider.setToolTip("Scrub through tick markers")
+        layout.addWidget(self.slider)
 
-        self.btn_prev_lcd = QPushButton("|<LCD")
-        self.btn_next_lcd = QPushButton("LCD>|")
-        self.btn_prev_lcd.setToolTip("Previous LCD screen change  [[]")
-        self.btn_next_lcd.setToolTip("Next LCD screen change  []]")
-        for btn in [self.btn_prev_lcd, self.btn_next_lcd]:
-            btn.setFixedWidth(50)
-            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            btn_row.addWidget(btn)
+        # --- Row 2: button groups ---
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(2)
 
-        self.btn_prev_sel = QPushButton("<Sel")
-        self.btn_next_sel = QPushButton("Sel>")
-        self.btn_prev_sel.setToolTip("Previous write to selected address(es)  [Alt+Left]")
-        self.btn_next_sel.setToolTip("Next write to selected address(es)  [Alt+Right]")
-        for btn in [self.btn_prev_sel, self.btn_next_sel]:
-            btn.setFixedWidth(42)
-            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            btn_row.addWidget(btn)
+        def _btn(label, tip, width=36):
+            b = QPushButton(label)
+            b.setToolTip(tip)
+            b.setFixedWidth(width)
+            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            return b
 
-        self.btn_add_bookmark = QPushButton("+Bk")
-        self.btn_prev_bookmark = QPushButton("<Bk")
-        self.btn_next_bookmark = QPushButton("Bk>")
-        self.btn_add_bookmark.setToolTip("Add/remove bookmark at current tick  [B]")
-        self.btn_prev_bookmark.setToolTip("Previous bookmark  [Ctrl+Left]")
-        self.btn_next_bookmark.setToolTip("Next bookmark  [Ctrl+Right]")
-        for btn in [self.btn_add_bookmark, self.btn_prev_bookmark, self.btn_next_bookmark]:
-            btn.setFixedWidth(36)
-            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            btn_row.addWidget(btn)
+        def _separator():
+            sep = QFrame()
+            sep.setFrameShape(QFrame.Shape.VLine)
+            sep.setFrameShadow(QFrame.Shadow.Sunken)
+            sep.setFixedWidth(6)
+            return sep
 
+        # Group 1: transport
+        self.btn_home = _btn("|<", "Jump to start  [Home]")
+        self.btn_play = _btn("Play", "Play / Pause auto-step  [Space]", width=44)
+        self.btn_end  = _btn(">|", "Jump to end  [End]")
+        for w in [self.btn_home, self.btn_play, self.btn_end, _separator()]:
+            btn_row.addWidget(w)
+
+        # Group 2: write steps
+        self.btn_back_1  = _btn("<",   "Back 1 write  [Left]")
+        self.btn_fwd_1   = _btn(">",   "Forward 1 write  [Right]")
+        self.btn_back_10 = _btn("<10", "Back 10 writes  [Shift+Left]")
+        self.btn_fwd_10  = _btn("10>", "Forward 10 writes  [Shift+Right]")
+        for w in [self.btn_back_1, self.btn_fwd_1, self.btn_back_10, self.btn_fwd_10, _separator()]:
+            btn_row.addWidget(w)
+
+        # Group 3: time steps (1s, 1m, 5m)
+        self.btn_back_1s = _btn("<1s",  "Back 1 second  [Ctrl+Left]")
+        self.btn_fwd_1s  = _btn("1s>",  "Forward 1 second  [Ctrl+Right]")
+        self.btn_back_1m = _btn("<1m",  "Back 1 minute")
+        self.btn_fwd_1m  = _btn("1m>",  "Forward 1 minute")
+        self.btn_back_5m = _btn("<5m",  "Back 5 minutes")
+        self.btn_fwd_5m  = _btn("5m>",  "Forward 5 minutes")
+        for w in [self.btn_back_1s, self.btn_fwd_1s,
+                  self.btn_back_1m, self.btn_fwd_1m,
+                  self.btn_back_5m, self.btn_fwd_5m, _separator()]:
+            btn_row.addWidget(w)
+
+        # Group 4: LCD change navigation
+        self.btn_prev_lcd = _btn("<LCD", "Previous LCD screen change  [[]", width=44)
+        self.btn_next_lcd = _btn("LCD>", "Next LCD screen change  []]",    width=44)
+        for w in [self.btn_prev_lcd, self.btn_next_lcd, _separator()]:
+            btn_row.addWidget(w)
+
+        # Group 5: selected address navigation
+        self.btn_prev_sel = _btn("<Sel", "Previous write to selected address(es)  [Alt+Left]",  width=42)
+        self.btn_next_sel = _btn("Sel>", "Next write to selected address(es)  [Alt+Right]", width=42)
+        for w in [self.btn_prev_sel, self.btn_next_sel, _separator()]:
+            btn_row.addWidget(w)
+
+        # Group 6: bookmarks
+        self.btn_add_bookmark  = _btn("+Bk", "Add/remove bookmark at current tick  [B]")
+        self.btn_prev_bookmark = _btn("<Bk", "Previous bookmark  [Ctrl+Left]")
+        self.btn_next_bookmark = _btn("Bk>", "Next bookmark  [Ctrl+Right]")
+        for w in [self.btn_add_bookmark, self.btn_prev_bookmark, self.btn_next_bookmark]:
+            btn_row.addWidget(w)
+
+        btn_row.addStretch()
         layout.addLayout(btn_row)
 
+        # --- Row 3: status ---
         self.status_label = QLabel("Tick: 0 | Time: 0.0s | Step: 0 of 0")
         self.status_label.setStyleSheet("color: #aaa; font-size: 11px;")
         layout.addWidget(self.status_label)
 
-    def update_status(self, tick, min_tick, cursor, total, diff_count):
-        emu_time = (tick - min_tick) / TICK_FREQUENCY
-        self.status_label.setText(
-            f"Tick: {tick:,} | Time: {emu_time:.1f}s | "
-            f"Step: write #{cursor:,} of {total:,} | "
-            f"Writes at tick: {diff_count}"
-        )
+    def update_status(self, tick, min_tick, cursor, total, diff_count,
+                      segment_index=None, loaded_count=None, total_segments=None,
+                      memory_mb=None):
+        elapsed = tick - min_tick
+        total_secs = elapsed / TICK_FREQUENCY
+        if total_secs >= 3600:
+            h = int(total_secs // 3600)
+            m = int((total_secs % 3600) // 60)
+            s = total_secs % 60
+            time_str = f"{h}h {m:02d}m {s:04.1f}s"
+        elif total_secs >= 60:
+            m = int(total_secs // 60)
+            s = total_secs % 60
+            time_str = f"{m}m {s:04.1f}s"
+        else:
+            time_str = f"{total_secs:.1f}s"
+
+        parts = [
+            f"Tick: {tick:,}",
+            f"Time: {time_str}",
+            f"Write: #{cursor:,}/{total:,}",
+            f"Diff: {diff_count}",
+        ]
+        if segment_index is not None and total_segments is not None:
+            parts.append(f"Seg: {segment_index}/{total_segments-1} ({loaded_count} loaded)")
+        if memory_mb is not None:
+            parts.append(f"Mem: {memory_mb:.0f}MB")
+        self.status_label.setText(" | ".join(parts))
+
+
+# ===========================================================================
+# SegmentLoadWorker
+# ===========================================================================
+
+class SegmentLoadWorker(QThread):
+    """Background thread to load a single segment without blocking the UI."""
+    finished = pyqtSignal(int)   # emits segment_index on completion
+    progress = pyqtSignal(int, str)
+
+    def __init__(self, stream, segment_index, parent=None):
+        super().__init__(parent)
+        self._stream = stream
+        self._segment_index = segment_index
+
+    def run(self):
+        def prog(pct, msg):
+            self.progress.emit(pct or 0, msg)
+        self._stream.load_segment(self._segment_index, prog)
+        self.finished.emit(self._segment_index)
 
 
 # ===========================================================================
@@ -763,13 +890,16 @@ class StreamViewer(QMainWindow):
                 progress.setLabelText(msg)
                 app.processEvents()
 
+        # Load bookmark store first so we can pre-load bookmark segments
+        self.annotation_store = AnnotationStore(filepath)
+        self.bookmark_store = BookmarkStore(filepath)
+
         stream_progress(0, "Parsing stream file...")
-        self.stream = open_stream(filepath, progress_callback=stream_progress)
+        self.stream = open_stream(filepath, progress_callback=stream_progress,
+                                  bookmark_ticks=self.bookmark_store.ticks or None)
 
         stream_progress(50, "Building write index...")
         self.tracker = CachedStateTracker(self.stream, progress_callback=stream_progress)
-        self.annotation_store = AnnotationStore(filepath)
-        self.bookmark_store = BookmarkStore(filepath)
 
         # Tick marking state
         self._marked_ticks = self.bookmark_store.ticks  # sorted list, loaded from disk
@@ -1002,6 +1132,12 @@ class StreamViewer(QMainWindow):
         self._lcd_popup = LcdPopupWidget()
         self.timeline_widget._stream = self.stream
         self.timeline_widget._lcd_popup = self._lcd_popup
+        # Populate segment info for segmented streams
+        if isinstance(self.stream, SegmentedTamStream):
+            segs = [(s.start_tick, s.end_tick, s.loaded) for s in self.stream.segments]
+            self.timeline_widget.set_segments(segs)
+            self.timeline_widget._on_load_segment = self._on_load_segment
+            self.timeline_widget._on_unload_segment = self._on_unload_segment
         main_layout.addWidget(self.timeline_widget)
 
         # --- Navigation bar ---
@@ -1018,6 +1154,10 @@ class StreamViewer(QMainWindow):
         self.nav_bar.btn_fwd_10.clicked.connect(lambda: self._nav_step(10))
         self.nav_bar.btn_back_1s.clicked.connect(lambda: self._nav_step_time(-1))
         self.nav_bar.btn_fwd_1s.clicked.connect(lambda: self._nav_step_time(1))
+        self.nav_bar.btn_back_1m.clicked.connect(lambda: self._nav_step_time(-60))
+        self.nav_bar.btn_fwd_1m.clicked.connect(lambda: self._nav_step_time(60))
+        self.nav_bar.btn_back_5m.clicked.connect(lambda: self._nav_step_time(-300))
+        self.nav_bar.btn_fwd_5m.clicked.connect(lambda: self._nav_step_time(300))
         self.nav_bar.btn_play.clicked.connect(self._toggle_play)
         self.nav_bar.btn_prev_lcd.clicked.connect(self._nav_prev_lcd_change)
         self.nav_bar.btn_next_lcd.clicked.connect(self._nav_next_lcd_change)
@@ -1245,21 +1385,79 @@ class StreamViewer(QMainWindow):
         else:
             self.diff_column.setText("")
 
-        # LCD (indexed lookup, O(log n))
-        frame = self.stream.nearest_lcd_frame(self.current_tick)
+        # LCD — use tracker's segment index for correct wraparound-aware lookup
+        seg_idx = self.tracker.current_segment_idx
+        if isinstance(self.stream, SegmentedTamStream):
+            frame = self.stream.nearest_lcd_frame(self.current_tick, seg_idx=seg_idx)
+        else:
+            frame = self.stream.nearest_lcd_frame(self.current_tick)
         if frame:
             self.lcd_widget.set_frame(frame[1])
         else:
             self.lcd_widget.set_frame(None)
 
-        # Nav status
+        # Nav status — include segment info for segmented streams
+        seg_kwargs = {}
+        if isinstance(self.stream, SegmentedTamStream) and self.stream.segments:
+            # Use tracker's cursor-based segment index (correct for wrapped ticks)
+            if seg_idx is None:
+                seg_idx = self.stream.segment_for_tick(self.current_tick)
+            seg_kwargs = {
+                "segment_index": seg_idx,
+                "loaded_count": self.stream.loaded_segment_count,
+                "total_segments": len(self.stream.segments),
+                "memory_mb": self.stream.estimated_memory_bytes / (1024 * 1024),
+            }
         self.nav_bar.update_status(
             self.current_tick, self.min_tick,
             self.tracker.write_cursor, self.tracker.total_writes,
             len(self.tracker.last_diff),
+            **seg_kwargs,
         )
 
         self._update_annotation_list()
+
+    # --- Segment load / unload (right-click from timeline) ---
+
+    def _on_load_segment(self, seg_index):
+        """Spawn a background worker to load a segment; update UI on completion."""
+        if not isinstance(self.stream, SegmentedTamStream):
+            return
+        if self.stream.is_segment_loaded(seg_index):
+            return
+        worker = SegmentLoadWorker(self.stream, seg_index, self)
+        worker.finished.connect(self._on_segment_load_finished)
+        worker.progress.connect(lambda pct, msg: self.nav_bar.status_label.setText(
+            f"Loading seg {seg_index}: {msg}"))
+        worker.start()
+        # Keep reference to prevent GC
+        if not hasattr(self, '_segment_workers'):
+            self._segment_workers = []
+        self._segment_workers.append(worker)
+
+    def _on_segment_load_finished(self, seg_index):
+        """Called when a segment finishes loading."""
+        self.tracker.add_segment_writes(seg_index)
+        # Update timeline
+        self.timeline_widget.update_segment_loaded(seg_index, True)
+        self._update_display()
+
+    def _on_unload_segment(self, seg_index):
+        """Unload a segment — refuse if it contains bookmarks."""
+        if not isinstance(self.stream, SegmentedTamStream):
+            return
+        seg = self.stream.segments[seg_index]
+        # Check for bookmarks in this segment
+        for tick in self._marked_ticks:
+            if seg.start_tick <= tick <= seg.end_tick:
+                QMessageBox.warning(self, "Cannot Unload",
+                                    f"Segment {seg_index} contains a bookmark at tick {tick:,}.\n"
+                                    f"Remove the bookmark first.")
+                return
+        self.tracker.remove_segment_writes(seg_index)
+        self.stream.unload_segment(seg_index)
+        self.timeline_widget.update_segment_loaded(seg_index, False)
+        self._update_display()
 
     @staticmethod
     def _compute_ram_diff(ram_a, ram_b):

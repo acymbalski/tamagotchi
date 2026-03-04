@@ -9,6 +9,8 @@ import io
 import zlib
 import glob as _glob
 from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Optional
 
 # Compression flags
 STREAM_COMPRESS_NONE = 0x00
@@ -65,6 +67,33 @@ RAM_BYTES = 320  # packed bytes (640 nibbles)
 
 # Icon labels (must match pc/main.cpp icon_labels)
 ICON_LABELS = ["FOOD", "LGHT", "GAME", "MED", "BATH", "STAT", "DISC", "ATTN"]
+
+
+@dataclass
+class SegmentInfo:
+    """Metadata for a single segment file. Loaded eagerly; stream data loaded lazily."""
+    index: int
+    filename: str
+    version: int = 1
+    start_tick: int = 0
+    end_tick: int = 0
+    loaded: bool = False
+    stream: Optional[object] = None         # TamStream when loaded, None otherwise
+    # Lightweight metadata (always available)
+    snapshot_count: int = 0
+    lcd_frame_count: int = 0
+    annotation_records: list = field(default_factory=list)
+    button_records: list = field(default_factory=list)
+    tick_marker_ticks: list = field(default_factory=list)
+    lcd_change_ticks: list = field(default_factory=list)
+    snapshot_positions: list = field(default_factory=list)   # (tick, local_offset)
+    lcd_frame_index: list = field(default_factory=list)      # (tick, local_offset)
+    last_snapshot_tick: int = 0
+    last_snapshot_ram: Optional[bytes] = None    # 320 bytes
+    first_lcd_frame: Optional[bytes] = None      # 72 bytes
+    last_lcd_frame: Optional[bytes] = None       # 72 bytes
+    compressed_size: int = 0
+    decompressed_size: int = 0
 
 
 class TamStream:
@@ -481,6 +510,11 @@ class TamStream:
         frame_data = self.read_lcd_frame_at(offset)
         return (tick, frame_data)
 
+    def read_snapshot_at(self, snap_key):
+        """Read 320 bytes of RAM from a snapshot key (integer offset for TamStream)."""
+        self._file.seek(snap_key + 1 + 4)  # skip tag byte + tick field
+        return bytearray(self._file.read(RAM_BYTES))
+
     def close(self):
         if self._file:
             self._file.close()
@@ -500,15 +534,17 @@ class TamStream:
 
 
 class SegmentedTamStream:
-    """Read a directory of segmented .tamstream files as a unified stream.
+    """Read a directory of segmented .tamstream files with lazy segment loading.
 
-    Opens each seg_NNN.tamstream in order, concatenates all decompressed
-    record data into a single BytesIO, then exposes the same interface as
-    TamStream. CachedStateTracker works unchanged because _file, _snapshot_positions,
-    _lcd_frame_index etc. all have the same semantics.
+    On init: scans metadata for ALL segments (cheap — keeps only indices and
+    small buffers), then loads only the first, last, and any bookmarked segments.
+    Middle segments can be loaded/unloaded on demand via load_segment/unload_segment.
+
+    Exposes the same interface as TamStream; CachedStateTracker works via the
+    read_snapshot_at() abstraction.
     """
 
-    def __init__(self, dirpath, progress_callback=None):
+    def __init__(self, dirpath, progress_callback=None, bookmark_ticks=None):
         self.dirpath = dirpath
         self.filepath = dirpath  # viewer compatibility
 
@@ -516,55 +552,434 @@ class SegmentedTamStream:
         if not seg_files:
             raise ValueError(f"No segments found in: {dirpath}")
 
-        all_records = bytearray()
-        version = 1
-
-        for i, seg_path in enumerate(seg_files):
+        # --- Phase 1: scan metadata for every segment ---
+        self.segments: list[SegmentInfo] = []
+        for i, path in enumerate(seg_files):
             if progress_callback:
-                pct = int(i * 70 / len(seg_files))
-                progress_callback(pct, f"Loading segment {i+1}/{len(seg_files)}...")
-            seg = TamStream(seg_path)
-            version = max(version, seg.version)
-            seg._file.seek(seg._records_start)
-            all_records.extend(seg._file.read())
-            seg.close()
+                pct = int(i * 80 / len(seg_files))
+                progress_callback(pct, f"Scanning segment {i+1}/{len(seg_files)}...")
+            info = self._scan_segment_metadata(path, i)
+            self.segments.append(info)
 
+        # Sorted list of segment start ticks for binary search
+        self._segment_tick_starts = [s.start_tick for s in self.segments]
+
+        # --- Phase 2: merge metadata (always available, even for unloaded segs) ---
+        self._lcd_change_ticks: list[int] = []
+        self._annotation_records: list = []
+        self._button_records: list = []
+        self._tick_marker_ticks: list[int] = []
+        # All LCD frame positions across all segments; (tick, seg_idx, local_offset)
+        self._lcd_frame_index_all: list = []
+
+        for seg in self.segments:
+            self._lcd_change_ticks.extend(seg.lcd_change_ticks)
+            self._annotation_records.extend(seg.annotation_records)
+            self._button_records.extend(seg.button_records)
+            self._tick_marker_ticks.extend(seg.tick_marker_ticks)
+            for tick, offset in seg.lcd_frame_index:
+                self._lcd_frame_index_all.append((tick, seg.index, offset))
+
+        self._lcd_change_ticks.sort()
+        self._annotation_records.sort(key=lambda x: x[0])
+        self._button_records.sort(key=lambda x: x[0])
+        self._tick_marker_ticks.sort()
+
+        # Version / geometry
+        version = max((s.version for s in self.segments), default=1)
         self.version = version
         self.lcd_bytes = LCD_BYTES_V2 if version >= 2 else LCD_BYTES_V1
         self._rec_sizes = _fixed_sizes(self.lcd_bytes)
         self.ram_nibbles = 0x280
-        self.start_tick = None
         self.compression = STREAM_COMPRESS_NONE
         self._raw_file = None
 
-        # Unified BytesIO of all concatenated record data (no header)
-        self._file = io.BytesIO(bytes(all_records))
-        self._records_start = 0
+        # Snapshot / LCD index from LOADED segments only; populated by load_segment()
+        # Entries are (tick, (seg_idx, local_offset)) tuples
+        self._snapshot_positions: list = []
+        self._lcd_frame_index: list = []
 
-        TamStream._build_index(self, progress_callback)
+        # --- Phase 3: load first, last, and any bookmarked segments ---
+        if progress_callback:
+            progress_callback(85, "Loading first segment...")
+        self.load_segment(0)
+        if len(self.segments) > 1:
+            if progress_callback:
+                progress_callback(90, "Loading last segment...")
+            self.load_segment(len(self.segments) - 1)
+
+        if bookmark_ticks:
+            for tick in bookmark_ticks:
+                idx = self.segment_for_tick(tick)
+                if idx is not None and not self.segments[idx].loaded:
+                    self.load_segment(idx)
+
+        if progress_callback:
+            n = sum(1 for s in self.segments if s.loaded)
+            progress_callback(100, f"Ready — {len(self.segments)} segments ({n} loaded)")
+
+    # ------------------------------------------------------------------
+    # Metadata scan: fast TIDX-based path (no decompression for compressed segments)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _read_tidx_fast(raw_file):
+        """Read TIDX index from the raw (possibly compressed) file without decompressing.
+        Returns (snapshot_positions, lcd_frame_positions) as [(tick, offset)] each.
+        The offsets are BytesIO positions in the decompressed data — valid for seeking
+        once the segment is loaded via TamStream.
+        """
+        try:
+            raw_file.seek(-8, 2)
+            idx_start_bytes = raw_file.read(8)
+            if len(idx_start_bytes) < 8:
+                return [], []
+            index_start = struct.unpack('<Q', idx_start_bytes)[0]
+            raw_file.seek(index_start)
+            magic = raw_file.read(4)
+            if magic != STREAM_INDEX_MAGIC:
+                return [], []
+            count = struct.unpack('<I', raw_file.read(4))[0]
+            snaps, lcds = [], []
+            for _ in range(count):
+                entry = raw_file.read(13)
+                if len(entry) < 13:
+                    break
+                tick = struct.unpack_from('<I', entry, 0)[0]
+                offset = struct.unpack_from('<Q', entry, 4)[0]
+                rec_type = entry[12]
+                if rec_type == REC_RAM_SNAPSHOT:
+                    snaps.append((tick, offset))
+                elif rec_type == REC_LCD_FRAME:
+                    lcds.append((tick, offset))
+            return snaps, lcds
+        except Exception:
+            return [], []
+
+    def _scan_segment_metadata(self, path: str, index: int) -> SegmentInfo:
+        """Fast metadata scan.  For compressed segments reads only the TIDX header
+        (no decompression). Annotations, buttons, and lcd_change_ticks are populated
+        lazily when the segment is fully loaded via load_segment().
+        """
+        info = SegmentInfo(index=index, filename=path)
+        info.compressed_size = os.path.getsize(path)
+
+        with open(path, 'rb') as f:
+            header = f.read(16)
+            if len(header) < 16 or header[0:4] != b'TAMS':
+                raise ValueError(f'Invalid tamstream: {path}')
+            version = struct.unpack_from('<H', header, 4)[0]
+            info.version = version
+            compression = header[12] if version >= 3 else STREAM_COMPRESS_NONE
+
+            if compression == STREAM_COMPRESS_ZLIB:
+                # Fast path: TIDX lives at the end of the raw file — readable without decompressing
+                snaps, lcds = SegmentedTamStream._read_tidx_fast(f)
+                info.snapshot_positions = snaps
+                info.lcd_frame_index = lcds
+                info.snapshot_count = len(snaps)
+                info.lcd_frame_count = len(lcds)
+                if snaps:
+                    info.start_tick = snaps[0][0]
+                    info.end_tick = snaps[-1][0]
+                elif lcds:
+                    info.start_tick = lcds[0][0]
+                    info.end_tick = lcds[-1][0]
+                # Rough decompressed-size estimate (actual set when fully loaded)
+                info.decompressed_size = info.compressed_size * 4
+                # annotations / buttons / tick_markers / lcd_change_ticks: populated on load
+            else:
+                # Uncompressed: use full TamStream scan
+                seg = TamStream(path)
+                info.version = seg.version
+                info.snapshot_positions = list(seg._snapshot_positions)
+                info.lcd_frame_index = list(seg._lcd_frame_index)
+                info.snapshot_count = len(seg._snapshot_positions)
+                info.lcd_frame_count = len(seg._lcd_frame_index)
+                info.start_tick = seg._first_tick or 0
+                info.end_tick = seg._last_tick or 0
+                info.annotation_records = list(seg._annotation_records)
+                info.button_records = list(seg._button_records)
+                info.tick_marker_ticks = list(seg._tick_marker_ticks)
+                info.lcd_change_ticks = list(seg._lcd_change_ticks)
+                info.decompressed_size = info.compressed_size
+                seg.close()
+
+        return info
+
+    # ------------------------------------------------------------------
+    # Segment load / unload
+    # ------------------------------------------------------------------
+
+    def load_segment(self, index: int, progress_callback=None):
+        """Fully load a segment: open its TamStream, merge indices and metadata."""
+        seg = self.segments[index]
+        if seg.loaded:
+            return
+        seg.stream = TamStream(seg.filename, progress_callback)
+        seg.loaded = True
+
+        # Update decompressed size from actual BytesIO
+        if hasattr(seg.stream._file, 'getbuffer'):
+            seg.decompressed_size = len(seg.stream._file.getbuffer())
+
+        # Use positions from the loaded TamStream (authoritative) — should match TIDX
+        seg.snapshot_positions = list(seg.stream._snapshot_positions)
+        seg.lcd_frame_index = list(seg.stream._lcd_frame_index)
+        seg.snapshot_count = len(seg.snapshot_positions)
+        seg.lcd_frame_count = len(seg.lcd_frame_index)
+
+        # Populate metadata lists from the loaded stream
+        new_anns = list(seg.stream._annotation_records)
+        new_btns = list(seg.stream._button_records)
+        new_ticks = list(seg.stream._tick_marker_ticks)
+        new_lcdc = list(seg.stream._lcd_change_ticks)
+
+        # Merge into global sorted lists (only records not already present)
+        if new_anns and not seg.annotation_records:
+            seg.annotation_records = new_anns
+            for item in new_anns:
+                bisect.insort(self._annotation_records, item)
+        if new_btns and not seg.button_records:
+            seg.button_records = new_btns
+            for item in new_btns:
+                bisect.insort(self._button_records, item)
+        if new_ticks and not seg.tick_marker_ticks:
+            seg.tick_marker_ticks = new_ticks
+            for t in new_ticks:
+                bisect.insort(self._tick_marker_ticks, t)
+        if new_lcdc and not seg.lcd_change_ticks:
+            seg.lcd_change_ticks = new_lcdc
+            for t in new_lcdc:
+                bisect.insort(self._lcd_change_ticks, t)
+
+        # Insert into shared snapshot / LCD indices (sorted by tick)
+        for tick, offset in seg.snapshot_positions:
+            bisect.insort(self._snapshot_positions, (tick, (index, offset)))
+        for tick, offset in seg.lcd_frame_index:
+            bisect.insort(self._lcd_frame_index, (tick, (index, offset)))
+
+    def unload_segment(self, index: int):
+        """Unload a segment, freeing its decompressed data; keep metadata."""
+        seg = self.segments[index]
+        if not seg.loaded:
+            return
+
+        # Remove from shared snapshot/LCD indices
+        self._snapshot_positions = [(t, k) for t, k in self._snapshot_positions if k[0] != index]
+        self._lcd_frame_index = [(t, k) for t, k in self._lcd_frame_index if k[0] != index]
+
+        # Remove from merged metadata lists
+        if seg.annotation_records:
+            ann_set = {(t, tx) for t, tx in seg.annotation_records}
+            self._annotation_records = [x for x in self._annotation_records if (x[0], x[1]) not in ann_set]
+            seg.annotation_records = []
+        if seg.button_records:
+            btn_set = set(map(tuple, seg.button_records))
+            self._button_records = [x for x in self._button_records if tuple(x) not in btn_set]
+            seg.button_records = []
+        if seg.tick_marker_ticks:
+            tick_set = set(seg.tick_marker_ticks)
+            self._tick_marker_ticks = [t for t in self._tick_marker_ticks if t not in tick_set]
+            seg.tick_marker_ticks = []
+        if seg.lcd_change_ticks:
+            lc_set = set(seg.lcd_change_ticks)
+            self._lcd_change_ticks = [t for t in self._lcd_change_ticks if t not in lc_set]
+            seg.lcd_change_ticks = []
+
+        if seg.stream:
+            seg.stream.close()
+            seg.stream = None
+        seg.loaded = False
+
+    def is_segment_loaded(self, index: int) -> bool:
+        return self.segments[index].loaded
+
+    @property
+    def loaded_segment_count(self) -> int:
+        return sum(1 for s in self.segments if s.loaded)
+
+    @property
+    def estimated_memory_bytes(self) -> int:
+        return sum(s.decompressed_size for s in self.segments if s.loaded)
+
+    def segment_for_tick(self, tick: int) -> Optional[int]:
+        """Return the segment index whose range contains tick, or nearest.
+
+        Uses linear search with 32-bit wraparound-aware distance so it works
+        even when the tick counter wraps around within the recording.
+        """
+        if not self.segments:
+            return None
+        # First pass: exact range match (handles normal and wraparound segments)
+        for i, seg in enumerate(self.segments):
+            if seg.end_tick >= seg.start_tick:
+                if seg.start_tick <= tick <= seg.end_tick:
+                    return i
+            else:
+                # Segment spans a 32-bit wraparound; tick valid above start OR below end
+                if tick >= seg.start_tick or tick <= seg.end_tick:
+                    return i
+        # Second pass: nearest by 32-bit-wraparound distance to segment midpoint
+        best_idx, best_dist = 0, None
+        half = 1 << 31
+        for i, seg in enumerate(self.segments):
+            mid = (seg.start_tick + seg.end_tick) // 2
+            d = (tick - mid) & 0xFFFFFFFF
+            if d > half:
+                d = (1 << 32) - d
+            if best_dist is None or d < best_dist:
+                best_dist, best_idx = d, i
+        return best_idx
+
+    # ------------------------------------------------------------------
+    # Interface expected by TamStream callers
+    # ------------------------------------------------------------------
 
     @property
     def tick_range(self):
-        return (self._first_tick, self._last_tick)
+        if not self.segments:
+            return (None, None)
+        return (self.segments[0].start_tick, self.segments[-1].end_tick)
 
-    # Delegate all TamStream methods to operate on self._file
-    records = TamStream.records
-    state_at_tick = TamStream.state_at_tick
-    stats_at_tick = TamStream.stats_at_tick
-    writes_in_range = TamStream.writes_in_range
-    annotations = TamStream.annotations
-    lcd_frames = TamStream.lcd_frames
-    button_events = TamStream.button_events
-    next_lcd_change = TamStream.next_lcd_change
-    prev_lcd_change = TamStream.prev_lcd_change
-    read_lcd_frame_at = TamStream.read_lcd_frame_at
-    nearest_lcd_frame = TamStream.nearest_lcd_frame
-    _try_read_ondisk_index = TamStream._try_read_ondisk_index
+    @property
+    def _first_tick(self):
+        return self.segments[0].start_tick if self.segments else None
+
+    @property
+    def _last_tick(self):
+        return self.segments[-1].end_tick if self.segments else None
+
+    def read_snapshot_at(self, snap_key) -> bytearray:
+        """Read 320 bytes of RAM from snap_key = (seg_idx, local_offset).
+        Falls back to last_snapshot_ram metadata if segment is unloaded.
+        """
+        seg_idx, local_offset = snap_key
+        seg = self.segments[seg_idx]
+        if seg.loaded and seg.stream:
+            return seg.stream.read_snapshot_at(local_offset)
+        # Fallback: use metadata snapshot (last in this segment)
+        if seg.last_snapshot_ram:
+            return bytearray(seg.last_snapshot_ram)
+        return bytearray(RAM_BYTES)
+
+    def records(self):
+        """Yield records from loaded segments in ascending tick order."""
+        loaded = sorted(
+            ((s.start_tick, i, s) for i, s in enumerate(self.segments) if s.loaded),
+            key=lambda x: x[0],
+        )
+        for _, _, seg in loaded:
+            yield from seg.stream.records()
+
+    def state_at_tick(self, target_tick: int) -> bytes:
+        """Reconstruct RAM at tick. Delegates to loaded segment, or uses metadata."""
+        seg_idx = self.segment_for_tick(target_tick)
+        if seg_idx is not None:
+            seg = self.segments[seg_idx]
+            if seg.loaded and seg.stream:
+                return seg.stream.state_at_tick(target_tick)
+            # Fallback: nearest loaded segment's last snapshot RAM
+            if seg.last_snapshot_ram:
+                return bytes(seg.last_snapshot_ram)
+        return bytes(RAM_BYTES)
+
+    def stats_at_tick(self, target_tick: int) -> dict:
+        ram = self.state_at_tick(target_tick)
+        try:
+            import memory_config
+            result = {}
+            for name in memory_config.MAP:
+                val = memory_config.get_value(ram, name)
+                if val is not None:
+                    result[name] = val
+            return result
+        except ImportError:
+            return {"error": "memory_config.py not found"}
+
+    def nearest_lcd_frame(self, target_tick: int, seg_idx: int = None):
+        """Return (tick, frame_bytes) closest to target, or None if unloaded.
+
+        If seg_idx is given, restricts the search to that segment (faster and
+        correct when the caller knows the current segment — avoids ambiguity
+        from 32-bit tick wraparound).  Otherwise performs a linear search over
+        all loaded segments using wraparound-aware distance.
+        """
+        half = 1 << 31
+
+        def _wrap_dist(a, b):
+            d = (a - b) & 0xFFFFFFFF
+            return d if d <= half else (1 << 32) - d
+
+        if seg_idx is not None:
+            seg = self.segments[seg_idx]
+            if not seg.loaded or not seg.stream:
+                return None
+            return seg.stream.nearest_lcd_frame(target_tick)
+
+        # Linear search over loaded segments — O(N_loaded), correct for wrapped ticks
+        best_dist, best_result = None, None
+        for seg in self.segments:
+            if not seg.loaded or not seg.stream:
+                continue
+            frame = seg.stream.nearest_lcd_frame(target_tick)
+            if frame is None:
+                continue
+            d = _wrap_dist(frame[0], target_tick)
+            if best_dist is None or d < best_dist:
+                best_dist, best_result = d, frame
+        return best_result
+
+    def read_lcd_frame_at(self, key):
+        """Read LCD frame from key = (seg_idx, local_offset)."""
+        if isinstance(key, tuple):
+            seg_idx, local_offset = key
+            seg = self.segments[seg_idx]
+            if seg.loaded and seg.stream:
+                return seg.stream.read_lcd_frame_at(local_offset)
+        return None
+
+    def next_lcd_change(self, current_tick: int):
+        idx = bisect.bisect_right(self._lcd_change_ticks, current_tick)
+        return self._lcd_change_ticks[idx] if idx < len(self._lcd_change_ticks) else None
+
+    def prev_lcd_change(self, current_tick: int):
+        idx = bisect.bisect_left(self._lcd_change_ticks, current_tick)
+        return self._lcd_change_ticks[idx - 1] if idx > 0 else None
+
+    def annotations(self):
+        return list(self._annotation_records)
+
+    def button_events(self):
+        return list(self._button_records)
+
+    def writes_in_range(self, start_tick, end_tick, addr=None, source=None):
+        for rec_type, tick, data in self.records():
+            if tick < start_tick:
+                continue
+            if tick > end_tick:
+                return
+            if rec_type not in (REC_ROM_WRITE, REC_BABYSITTER_WRITE):
+                continue
+            if source == "rom" and rec_type != REC_ROM_WRITE:
+                continue
+            if source == "babysitter" and rec_type != REC_BABYSITTER_WRITE:
+                continue
+            if addr is not None and data["addr"] != addr:
+                continue
+            yield (rec_type, tick, data)
+
+    def lcd_frames(self):
+        for rec_type, tick, data in self.records():
+            if rec_type == REC_LCD_FRAME:
+                yield (tick, data["display"])
 
     def close(self):
-        if self._file:
-            self._file.close()
-            self._file = None
+        for seg in self.segments:
+            if seg.stream:
+                seg.stream.close()
+                seg.stream = None
+                seg.loaded = False
 
     def __del__(self):
         self.close()
@@ -576,13 +991,15 @@ class SegmentedTamStream:
         self.close()
 
 
-def open_stream(path, progress_callback=None):
+def open_stream(path, progress_callback=None, bookmark_ticks=None):
     """Open a .tamstream file or a segment directory.
 
     Returns a TamStream for single files, SegmentedTamStream for directories.
+    bookmark_ticks: optional list of tick values whose segments should be pre-loaded.
     """
     if os.path.isdir(path):
-        return SegmentedTamStream(path, progress_callback=progress_callback)
+        return SegmentedTamStream(path, progress_callback=progress_callback,
+                                  bookmark_ticks=bookmark_ticks)
     return TamStream(path, progress_callback=progress_callback)
 
 
@@ -609,60 +1026,181 @@ class CachedStateTracker:
         self._current_tick = 0
         self._last_diff = {}
         self._writes = []         # [(tick, addr, new_val, old_val, source, func_id), ...]
+        self._segment_write_ranges: dict = {}  # seg_idx -> (start, end) in _writes
         self._build_write_index(progress_callback)
 
+    @staticmethod
+    def _apply_write_to_ram(running_ram, addr, new_val):
+        """Apply nibble write to running_ram, return (old_val, updated_ram)."""
+        byte_idx = addr >> 1
+        if byte_idx >= RAM_BYTES:
+            return None, running_ram
+        if (addr & 1) == 0:
+            old_val = (running_ram[byte_idx] & 0xF0) >> 4
+            running_ram[byte_idx] = (running_ram[byte_idx] & 0x0F) | (new_val << 4)
+        else:
+            old_val = running_ram[byte_idx] & 0x0F
+            running_ram[byte_idx] = (running_ram[byte_idx] & 0xF0) | (new_val & 0x0F)
+        return old_val, running_ram
+
     def _build_write_index(self, progress_callback=None):
-        """Scan all records and build indexed write list with old_values."""
-        # Start from first snapshot to get a baseline
+        """Scan records and build indexed write list with old values.
+
+        For SegmentedTamStream: only loaded segments are processed; also records
+        which _writes indices belong to each segment in _segment_write_ranges.
+        """
         if not self._stream._snapshot_positions:
             return
 
-        snap_tick, snap_pos = self._stream._snapshot_positions[0]
-        f = self._stream._file
-        f.seek(snap_pos + 1 + 4)  # skip tag + tick
-        running_ram = bytearray(f.read(RAM_BYTES))
+        snap_tick, snap_key = self._stream._snapshot_positions[0]
+        running_ram = self._stream.read_snapshot_at(snap_key)
 
         writes = []
+        self._segment_write_ranges = {}
         count = 0
-        for rec_type, tick, data in self._stream.records():
-            if rec_type in (REC_ROM_WRITE, REC_BABYSITTER_WRITE):
-                addr = data["addr"]
-                new_val = data["value"]
-                if addr < 640:
-                    byte_idx = addr >> 1
-                    if byte_idx < RAM_BYTES:
-                        # Get old value
-                        if (addr & 1) == 0:
-                            old_val = (running_ram[byte_idx] & 0xF0) >> 4
-                        else:
-                            old_val = running_ram[byte_idx] & 0x0F
-                        # Apply new value to running state
-                        if (addr & 1) == 0:
-                            running_ram[byte_idx] = (running_ram[byte_idx] & 0x0F) | (new_val << 4)
-                        else:
-                            running_ram[byte_idx] = (running_ram[byte_idx] & 0xF0) | (new_val & 0x0F)
 
-                        source = 0 if rec_type == REC_ROM_WRITE else 1
-                        func_id = data.get("func_id", 0)
-                        writes.append((tick, addr, new_val, old_val, source, func_id))
-
-            elif rec_type == REC_RAM_SNAPSHOT:
-                # Reset running_ram to this snapshot
-                mem = data["memory"]
-                running_ram = bytearray(mem)
-
-            count += 1
-            if progress_callback and count % 200000 == 0:
-                progress_callback(None, f"Building write index... {len(writes):,} writes")
+        is_segmented = hasattr(self._stream, 'segments')
+        if is_segmented:
+            for seg in self._stream.segments:
+                if not seg.loaded or not seg.stream:
+                    continue
+                seg_write_start = len(writes)
+                for rec_type, tick, data in seg.stream.records():
+                    if rec_type in (REC_ROM_WRITE, REC_BABYSITTER_WRITE):
+                        addr = data["addr"]
+                        new_val = data["value"]
+                        if addr < 640:
+                            old_val, running_ram = self._apply_write_to_ram(running_ram, addr, new_val)
+                            if old_val is not None:
+                                source = 0 if rec_type == REC_ROM_WRITE else 1
+                                func_id = data.get("func_id", 0)
+                                writes.append((tick, addr, new_val, old_val, source, func_id))
+                    elif rec_type == REC_RAM_SNAPSHOT:
+                        running_ram = bytearray(data["memory"])
+                    count += 1
+                    if progress_callback and count % 200000 == 0:
+                        progress_callback(None, f"Building write index... {len(writes):,} writes")
+                self._segment_write_ranges[seg.index] = (seg_write_start, len(writes))
+        else:
+            for rec_type, tick, data in self._stream.records():
+                if rec_type in (REC_ROM_WRITE, REC_BABYSITTER_WRITE):
+                    addr = data["addr"]
+                    new_val = data["value"]
+                    if addr < 640:
+                        old_val, running_ram = self._apply_write_to_ram(running_ram, addr, new_val)
+                        if old_val is not None:
+                            source = 0 if rec_type == REC_ROM_WRITE else 1
+                            func_id = data.get("func_id", 0)
+                            writes.append((tick, addr, new_val, old_val, source, func_id))
+                elif rec_type == REC_RAM_SNAPSHOT:
+                    running_ram = bytearray(data["memory"])
+                count += 1
+                if progress_callback and count % 200000 == 0:
+                    progress_callback(None, f"Building write index... {len(writes):,} writes")
 
         self._writes = writes
         self._write_ticks = [w[0] for w in writes]
-        # Per-address write index: addr -> sorted list of indices into _writes
         self._addr_write_indices: dict[int, list[int]] = defaultdict(list)
         for i, (tick, addr, new_val, old_val, source, func_id) in enumerate(writes):
             self._addr_write_indices[addr].append(i)
         if progress_callback:
             progress_callback(None, f"Write index complete: {len(writes):,} writes")
+
+    def _rebuild_indices(self):
+        """Rebuild _write_ticks and _addr_write_indices from _writes."""
+        self._write_ticks = [w[0] for w in self._writes]
+        self._addr_write_indices = defaultdict(list)
+        for i, (tick, addr, *_rest) in enumerate(self._writes):
+            self._addr_write_indices[addr].append(i)
+
+    def add_segment_writes(self, segment_index: int, progress_callback=None):
+        """Build and insert writes from a newly-loaded segment into the index."""
+        stream = self._stream
+        seg = stream.segments[segment_index]
+        if not seg.loaded or not seg.stream:
+            return
+        if segment_index in self._segment_write_ranges:
+            return  # already indexed
+
+        # Find the nearest prior loaded snapshot to seed running_ram
+        seg_start = seg.start_tick
+        running_ram = bytearray(RAM_BYTES)
+        best_snap_tick = -1
+        for snap_tick, snap_key in self._stream._snapshot_positions:
+            if snap_tick <= seg_start:
+                best_snap_tick = snap_tick
+                running_ram = self._stream.read_snapshot_at(snap_key)
+            else:
+                break
+
+        # Apply existing loaded writes from best_snap_tick up to seg_start
+        if best_snap_tick >= 0:
+            start_idx = bisect.bisect_left(self._write_ticks, best_snap_tick)
+            for i in range(start_idx, len(self._writes)):
+                w_tick = self._writes[i][0]
+                if w_tick >= seg_start:
+                    break
+                _, addr, new_val, *_ = self._writes[i]
+                _, running_ram = self._apply_write_to_ram(running_ram, addr, new_val)
+
+        # Process this segment's records
+        new_writes = []
+        for rec_type, tick, data in seg.stream.records():
+            if rec_type in (REC_ROM_WRITE, REC_BABYSITTER_WRITE):
+                addr = data["addr"]
+                new_val = data["value"]
+                if addr < 640:
+                    old_val, running_ram = self._apply_write_to_ram(running_ram, addr, new_val)
+                    if old_val is not None:
+                        source = 0 if rec_type == REC_ROM_WRITE else 1
+                        func_id = data.get("func_id", 0)
+                        new_writes.append((tick, addr, new_val, old_val, source, func_id))
+            elif rec_type == REC_RAM_SNAPSHOT:
+                running_ram = bytearray(data["memory"])
+
+        if not new_writes:
+            self._segment_write_ranges[segment_index] = (len(self._writes), len(self._writes))
+            return
+
+        # Find insertion point (new_writes[0][0] is the first tick of this segment)
+        insert_pos = bisect.bisect_left(self._write_ticks, new_writes[0][0])
+        self._writes = self._writes[:insert_pos] + new_writes + self._writes[insert_pos:]
+        n = len(new_writes)
+
+        # Shift any existing segment range entries that come after insert_pos
+        for idx, (s, e) in list(self._segment_write_ranges.items()):
+            if s >= insert_pos:
+                self._segment_write_ranges[idx] = (s + n, e + n)
+        self._segment_write_ranges[segment_index] = (insert_pos, insert_pos + n)
+
+        # Adjust write cursor
+        if self._write_cursor >= insert_pos:
+            self._write_cursor += n
+
+        self._rebuild_indices()
+
+    def remove_segment_writes(self, segment_index: int):
+        """Remove writes belonging to an unloaded segment from the index."""
+        if segment_index not in self._segment_write_ranges:
+            return
+        start_idx, end_idx = self._segment_write_ranges[segment_index]
+        n = end_idx - start_idx
+        if n > 0:
+            del self._writes[start_idx:end_idx]
+        del self._segment_write_ranges[segment_index]
+
+        # Adjust other segment ranges
+        for idx, (s, e) in list(self._segment_write_ranges.items()):
+            if s >= end_idx:
+                self._segment_write_ranges[idx] = (s - n, e - n)
+
+        # Adjust write cursor
+        if self._write_cursor >= end_idx:
+            self._write_cursor -= n
+        elif self._write_cursor > start_idx:
+            self._write_cursor = start_idx
+
+        self._rebuild_indices()
 
     @property
     def current_tick(self):
@@ -683,6 +1221,27 @@ class CachedStateTracker:
     @property
     def total_writes(self):
         return len(self._writes)
+
+    @property
+    def current_segment_idx(self) -> Optional[int]:
+        """Return the segment index at the current write-cursor position.
+
+        Uses _segment_write_ranges (populated when the stream is segmented and
+        CachedStateTracker was built from it).  Returns None for single-file
+        streams or when the mapping hasn't been built yet.
+        """
+        if not self._segment_write_ranges:
+            return None
+        cursor = self._write_cursor
+        for seg_idx, (start, end) in self._segment_write_ranges.items():
+            if start <= cursor < end:
+                return seg_idx
+        # Cursor before first segment or after last — return boundary
+        if cursor == 0 and self._segment_write_ranges:
+            return min(self._segment_write_ranges.keys())
+        if self._segment_write_ranges:
+            return max(self._segment_write_ranges.keys())
+        return None
 
     def _apply_nibble(self, addr, value):
         """Apply a nibble value to the RAM."""
@@ -721,13 +1280,9 @@ class CachedStateTracker:
             else:
                 return
 
-        # Load snapshot RAM
-        f = self._stream._file
-        f.seek(best_snap[1] + 1 + 4)
-        self._ram = bytearray(f.read(RAM_BYTES))
+        # Load snapshot RAM via abstraction (handles both TamStream and SegmentedTamStream)
+        self._ram = self._stream.read_snapshot_at(best_snap[1])
 
-        # Binary search for first write at or after snapshot tick
-        import bisect
         snap_tick = best_snap[0]
         # Find start position in writes list
         start_idx = bisect.bisect_left(self._write_ticks, snap_tick)

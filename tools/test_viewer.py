@@ -1439,3 +1439,70 @@ class TestButtonTooltips:
         assert hasattr(nav, 'btn_next_sel')
         assert nav.btn_prev_sel.text() == "<Sel"
         assert nav.btn_next_sel.text() == "Sel>"
+
+
+class TestTamaToolExport:
+    """Tests for TamaTool save state export."""
+
+    def test_output_size(self):
+        """Exported save is exactly 4140 bytes."""
+        from stream_viewer import StreamViewer
+        ram = bytes(320)
+        data = StreamViewer._build_tamatool_savestate(ram, tick=0)
+        assert len(data) == 4140
+
+    def test_sp_default(self):
+        """SP defaults to 0xFC (typical init value)."""
+        from stream_viewer import StreamViewer
+        data = StreamViewer._build_tamatool_savestate(bytes(320), tick=0)
+        assert data[9] == 0xFC
+
+    def test_tick_stored(self):
+        """Tick counter is written to header bytes 11-14 LE."""
+        import struct
+        from stream_viewer import StreamViewer
+        tick = 0xDEADBEEF & 0xFFFFFFFF
+        data = StreamViewer._build_tamatool_savestate(bytes(320), tick=tick)
+        stored = struct.unpack_from('<I', data, 11)[0]
+        assert stored == (tick & 0xFFFFFFFF)
+
+    def test_ram_unpacked_correctly(self):
+        """RAM nibbles are unpacked into nibble-bytes at offset 44."""
+        from stream_viewer import StreamViewer
+        # Create a RAM with known values: byte 0 = 0xAB → nibble[0]=0xA, nibble[1]=0xB
+        ram = bytearray(320)
+        ram[0] = 0xAB
+        ram[1] = 0xCD
+        data = StreamViewer._build_tamatool_savestate(bytes(ram), tick=0)
+        # nibble addresses 0,1 → bytes at offset 44, 45
+        assert data[44 + 0] == 0xA  # high nibble of byte 0
+        assert data[44 + 1] == 0xB  # low nibble of byte 0
+        assert data[44 + 2] == 0xC  # high nibble of byte 1
+        assert data[44 + 3] == 0xD  # low nibble of byte 1
+
+    def test_unused_addresses_zeroed(self):
+        """Nibble addresses 0x280-0xFFF are zero."""
+        from stream_viewer import StreamViewer
+        data = StreamViewer._build_tamatool_savestate(bytes(320), tick=0)
+        # Offset 44 + 0x280 = 44 + 640 = 684 to end
+        assert all(b == 0 for b in data[684:]), "Non-zero in unused address range"
+
+    def test_all_nibbles_valid(self):
+        """Every byte in the 4096-nibble region is 0-15."""
+        from stream_viewer import StreamViewer
+        ram = bytes(range(256)) * 2  # 512 bytes, truncated to 320
+        data = StreamViewer._build_tamatool_savestate(ram[:320], tick=12345)
+        assert all(b <= 0x0F for b in data[44:]), "Non-nibble value in memory region"
+
+    def test_export_button_exists(self, tmp_path):
+        """Export TamaTool Save button exists in the viewer."""
+        _ensure_qapp()
+        from stream_viewer import StreamViewer
+        snap_mem = bytes(RAM_BYTES)
+        data = make_tamstream_bytes(0, [
+            {"type": REC_RAM_SNAPSHOT, "tick": 0, "memory": snap_mem},
+        ])
+        fpath = _write_tamstream_to_file(data, tmp_path, "export_test.tamstream")
+        viewer = StreamViewer(str(fpath))
+        assert hasattr(viewer, 'export_tt_btn')
+        assert "TamaTool" in viewer.export_tt_btn.text()
