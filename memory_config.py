@@ -7,22 +7,20 @@ MAP = {
     "attention":    {"addr": 0x02D, "type": "bool"},        # Non-zero = needs attention
     "poop":         {"addr": 0x04D, "type": "nibble"},      # Count of poops
     "sick":         {"addr": 0x049, "type": "level"},       # 0-F scaled to 0-4; derived flag — ROM re-asserts from 0x06D
-    "sick_flag2":   {"addr": 0x06D, "type": "bool"},        # Authoritative sick register — 1=sick, 0=healthy; lower nibble of byte 0x036 # NOTE: Unclear
-    "sick_level":   {"addr": 0x048, "type": "nibble"},      # Illness level counter — 0xF=max sick, decreases with medicine # NOTE: Unclear
-    "sick_severity":{"addr": 0x0F3, "type": "nibble"},      # Death timer — counts up naturally, medicine resets it; 0=cured # NOTE: Unclear
+    "sick_flag2":   {"addr": 0x06D, "type": "bool"},        # Authoritative sick register — 1=sick, 0=healthy; lower nibble of byte 0x036
+    "sick_level":   {"addr": 0x048, "type": "nibble"},      # Illness level counter — 0xF=max sick, decreases with medicine
+    "sick_severity":{"addr": 0x0F3, "type": "nibble"},      # Death timer — counts up naturally, medicine resets it; 0=cured
     "sleeping":     {"addr": 0x04A, "type": "sleep_logic"}, # 8-F is sleeping
     "age":          {"addr": 0x054, "type": "bcd"},         # Age in years (BCD)
     "weight":       {"addr": 0x046, "type": "bcd"},         # Weight in oz
     "lifecycle":    {"addr": 0x05D, "type": "stage_logic"}, # Lifecycle stage (0, 1, 2, 4...)
-    "character":    {"addr": 0x050, "type": "nibble"},      # Character within stage (0x050 correlates well)
+    "character":    {"addr": 0x050, "type": "nibble"},      # Character within stage
+    "behavior_mistake":{"addr": 0x051, "type": "nibble"},   # Behavior mistakes (discipline calls ignored)
+    "neglect":      {"addr": 0x042, "type": "nibble"},      # Neglect counter (hunger/happy ignored)
 
     # --- Not yet discovered (addr=None until confirmed via analyzer.py) ---
-    # Find via: python analyzer.py --field life_stage  (captures spanning egg→adult)
     "life_stage":    {"addr": None, "type": "nibble"},  # 0=egg_new,1=egg_init,2=baby,3=child,4=teen,5=adult,6=senior,7=dead
-    # Find via: python analyzer.py --field char_id  (divergent care runs, e.g. Mametchi vs Tarakotchi)
     "char_id":       {"addr": None, "type": "nibble"},  # character within stage (0-indexed per stage)
-    # Find via: delta analysis before/after a neglect event (hunger decay to 0)
-    "care_mistakes": {"addr": None, "type": "nibble"},  # neglect counter
 }
 
 def decode_nibble(mem, addr):
