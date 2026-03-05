@@ -17,6 +17,7 @@ MAP = {
     "character":    {"addr": 0x050, "type": "nibble"},      # Character within stage
     "behavior_mistake":{"addr": 0x051, "type": "nibble"},   # Behavior mistakes (discipline calls ignored)
     "neglect":      {"addr": 0x042, "type": "nibble"},      # Neglect counter (hunger/happy ignored)
+    "clock":        {"addr": 0x10,  "type": "clock_logic"}, # Emulated system clock (0x10-0x15)
 
     # --- Not yet discovered (addr=None until confirmed via analyzer.py) ---
     "life_stage":    {"addr": None, "type": "nibble"},  # 0=egg_new,1=egg_init,2=baby,3=child,4=teen,5=adult,6=senior,7=dead
@@ -61,5 +62,32 @@ def get_value(mem, key):
         # Observed: 0=Egg, 1=Baby, 2=Child, 4=Teen, 9=Adult (NOT 8 — confirmed from captures)
         mapping = {0: "Egg", 1: "Baby", 2: "Child", 4: "Teen", 9: "Adult", 16: "Special"}
         return mapping.get(val, "Unknown")
+    elif ctype == "clock_logic":
+        # addr 0x10/0x11 = sec ones/tens
+        # addr 0x12/0x13 = min ones/tens
+        # addr 0x14/0x15 = hour ones/tens (special encoding)
+        sec_ones = decode_nibble(mem, 0x10)
+        sec_tens = decode_nibble(mem, 0x11)
+        min_ones = decode_nibble(mem, 0x12)
+        min_tens = decode_nibble(mem, 0x13)
+        h_ones = decode_nibble(mem, 0x14)
+        h_tens = decode_nibble(mem, 0x15)
+        
+        sec = sec_tens * 10 + sec_ones
+        m = min_tens * 10 + min_ones
+        # Hour encoding: hour24 = (h_tens << 4) | h_ones
+        h24 = (h_tens << 4) | h_ones
+        
+        ampm = "AM"
+        h12 = h24
+        if h24 == 0:
+            h12 = 12
+        elif h24 == 12:
+            ampm = "PM"
+        elif h24 > 12:
+            h12 = h24 - 12
+            ampm = "PM"
+        
+        return f"{h12}:{m:02d}:{sec:02d} {ampm}"
     
     return None
