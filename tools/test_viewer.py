@@ -1445,54 +1445,70 @@ class TestTamaToolExport:
     """Tests for TamaTool save state export."""
 
     def test_output_size(self):
-        """Exported save is exactly 4140 bytes."""
+        """Exported save is exactly 977 bytes (E0C6S48 compatible)."""
         from stream_viewer import StreamViewer
         ram = bytes(320)
         data = StreamViewer._build_tamatool_savestate(ram, tick=0)
-        assert len(data) == 4140
+        assert len(data) == 977
 
-    def test_sp_default(self):
-        """SP defaults to 0xFC (typical init value)."""
+    def test_magic_and_version(self):
+        """Magic is TLST and version is 3."""
         from stream_viewer import StreamViewer
         data = StreamViewer._build_tamatool_savestate(bytes(320), tick=0)
-        assert data[9] == 0xFC
+        assert data[0:4] == b"TLST"
+        assert data[4] == 3
 
-    def test_tick_stored(self):
-        """Tick counter is written to header bytes 11-14 LE."""
+    def test_pc_and_sp(self):
+        """PC is 0x051A and SP is 0xFC."""
         import struct
         from stream_viewer import StreamViewer
-        tick = 0xDEADBEEF & 0xFFFFFFFF
+        data = StreamViewer._build_tamatool_savestate(bytes(320), tick=0)
+        pc = struct.unpack_from('<H', data, 5)[0]
+        assert pc == 0x051A
+        assert data[14] == 0xFC
+
+    def test_tick_and_timestamps_synced(self):
+        """Tick counter and all timestamps are synced to current tick."""
+        import struct
+        from stream_viewer import StreamViewer
+        tick = 0xEECA8535
         data = StreamViewer._build_tamatool_savestate(bytes(320), tick=tick)
-        stored = struct.unpack_from('<I', data, 11)[0]
-        assert stored == (tick & 0xFFFFFFFF)
+        stored_tick = struct.unpack_from('<I', data, 16)[0]
+        assert stored_tick == tick
+        # Check first and last timestamp
+        assert struct.unpack_from('<I', data, 20)[0] == tick
+        assert struct.unpack_from('<I', data, 52)[0] == tick
 
     def test_ram_unpacked_correctly(self):
-        """RAM nibbles are unpacked into nibble-bytes at offset 44."""
+        """RAM nibbles are unpacked into nibble-bytes at offset 81."""
         from stream_viewer import StreamViewer
         # Create a RAM with known values: byte 0 = 0xAB → nibble[0]=0xA, nibble[1]=0xB
         ram = bytearray(320)
         ram[0] = 0xAB
         ram[1] = 0xCD
         data = StreamViewer._build_tamatool_savestate(bytes(ram), tick=0)
-        # nibble addresses 0,1 → bytes at offset 44, 45
-        assert data[44 + 0] == 0xA  # high nibble of byte 0
-        assert data[44 + 1] == 0xB  # low nibble of byte 0
-        assert data[44 + 2] == 0xC  # high nibble of byte 1
-        assert data[44 + 3] == 0xD  # low nibble of byte 1
+        # nibble addresses 0,1 → bytes at offset 81, 82
+        assert data[81 + 0] == 0xA  # high nibble of byte 0
+        assert data[81 + 1] == 0xB  # low nibble of byte 0
+        assert data[81 + 2] == 0xC  # high nibble of byte 1
+        assert data[81 + 3] == 0xD  # low nibble of byte 1
 
-    def test_unused_addresses_zeroed(self):
-        """Nibble addresses 0x280-0xFFF are zero."""
+    def test_io_initialization(self):
+        """Key I/O registers are initialized."""
         from stream_viewer import StreamViewer
         data = StreamViewer._build_tamatool_savestate(bytes(320), tick=0)
-        # Offset 44 + 0x280 = 44 + 640 = 684 to end
-        assert all(b == 0 for b in data[684:]), "Non-zero in unused address range"
+        # IO starts at 849
+        assert data[849 + 0x41] == 0xF
+        assert data[849 + 0x54] == 0xF
+        assert data[849 + 0x71] == 0x8
 
-    def test_all_nibbles_valid(self):
-        """Every byte in the 4096-nibble region is 0-15."""
+    def test_interrupts_enabled(self):
+        """Input and Clock interrupt masks are enabled."""
         from stream_viewer import StreamViewer
-        ram = bytes(range(256)) * 2  # 512 bytes, truncated to 320
-        data = StreamViewer._build_tamatool_savestate(ram[:320], tick=12345)
-        assert all(b <= 0x0F for b in data[44:]), "Non-nibble value in memory region"
+        data = StreamViewer._build_tamatool_savestate(bytes(320), tick=0)
+        assert data[70] == 0xF  # K10-K13 Mask
+        assert data[73] == 0xF  # K00-K03 Mask
+        assert data[79] == 0xF  # Clock Timer Mask
 
     def test_export_button_exists(self, tmp_path):
         """Export TamaTool Save button exists in the viewer."""

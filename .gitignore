@@ -10,3 +10,4 @@ tama_save.bin
 *.pyc
 .gemini/
 venv/
+tools/viewer_settings.json

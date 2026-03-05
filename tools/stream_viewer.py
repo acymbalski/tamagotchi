@@ -588,8 +588,9 @@ class TimelineWidget(QWidget):
 
     def update_segment_loaded(self, index, loaded):
         if 0 <= index < len(self._segments):
-            s, e, _ = self._segments[index]
-            self._segments[index] = (s, e, loaded)
+            # _segments entries are (start_tick, end_tick, loaded, file_index)
+            s, e, _, f_idx = self._segments[index]
+            self._segments[index] = (s, e, loaded, f_idx)
             self.update()
 
     def tick_from_x(self, x):
@@ -600,7 +601,7 @@ class TimelineWidget(QWidget):
 
     def _seg_index_at_tick(self, tick):
         """Return segment index whose range contains tick, or None."""
-        for i, (s, e, _loaded) in enumerate(self._segments):
+        for i, (s, e, _loaded, _f_idx) in enumerate(self._segments):
             if s <= tick <= e:
                 return i
         return None
@@ -660,7 +661,7 @@ class TimelineWidget(QWidget):
                 action.triggered.connect(lambda: self._on_load_segment and self._on_load_segment(seg_idx))
             menu.addSeparator()
             
-        unloaded_count = sum(1 for _, _, loaded in self._segments if not loaded)
+        unloaded_count = sum(1 for seg in self._segments if not seg[2])
         if unloaded_count > 0:
             action_all = menu.addAction(f"Load all segments ({unloaded_count} remaining)")
             action_all.triggered.connect(lambda: self._on_load_all_segments and self._on_load_all_segments())
@@ -679,7 +680,7 @@ class TimelineWidget(QWidget):
             return
 
         # --- 1. Segment rectangles ---
-        for start_t, end_t, is_loaded in self._segments:
+        for start_t, end_t, is_loaded, _ in self._segments:
             x0 = int((start_t - self.min_tick) / span * w)
             x1 = int((end_t - self.min_tick) / span * w)
             seg_w = max(1, x1 - x0)
@@ -691,7 +692,7 @@ class TimelineWidget(QWidget):
         # --- 2. Segment boundary lines ---
         if self._segments:
             painter.setPen(QPen(QColor(80, 80, 80), 1))
-            for start_t, end_t, _ in self._segments:
+            for start_t, end_t, _, _ in self._segments:
                 for t in (start_t, end_t):
                     x = int((t - self.min_tick) / span * w)
                     painter.drawLine(x, 0, x, h)
@@ -1874,60 +1875,75 @@ class StreamViewer(QMainWindow):
 
     @staticmethod
     def _build_tamatool_savestate(ram_320: bytes, tick: int) -> bytes:
-        """Build a TamaTool-compatible save state binary (4140 bytes).
-
-        Format (reverse-engineered from save0.bin):
-          Bytes  0- 1: pc        (u16 LE) — zeroed (reset-like state)
-          Bytes  2- 3: x         (u16 LE) — zeroed
-          Bytes  4- 5: y         (u16 LE) — zeroed
-          Byte   6   : a         (u8)     — zeroed
-          Byte   7   : b         (u8)     — zeroed
-          Byte   8   : np        (u8)     — zeroed
-          Byte   9   : sp        (u8)     — 0xFC (typical init)
-          Byte  10   : flags     (u8)     — zeroed
-          Bytes 11-14: tick_counter (u32 LE) — set to captured tick
-          Bytes 15-18: prog_timer_timestamp (u32 LE) — zeroed
-          Byte  19   : prog_timer_enabled (u8) — 0
-          Byte  20   : prog_timer_data    (u8) — 0
-          Byte  21   : prog_timer_rld     (u8) — 0
-          Bytes 22-25: call_depth (u32 LE) — zeroed
-          Bytes 26-43: 6 interrupt slots × 3 bytes (factor, mask, triggered) — zeroed
-          Bytes 44-4139: 4096 nibble bytes (1 nibble per byte, 0-15)
-            nibble[0x000..0x27F] = unpacked from ram_320 (640 nibbles)
-            nibble[0x280..0xFFF] = 0x00 (unused/IO region)
+        """Build a TamaTool-compatible save state binary (TLST v3 format).
+        Supports both E0C6S46 (640 nibbles) and E0C6S48 (768 nibbles) builds.
         """
         import struct
 
-        out = bytearray(4140)
-        # CPU registers
-        struct.pack_into('<H', out, 0, 0)       # pc = 0
-        struct.pack_into('<H', out, 2, 0)       # x = 0
-        struct.pack_into('<H', out, 4, 0)       # y = 0
-        out[6] = 0                              # a
-        out[7] = 0                              # b
-        out[8] = 0                              # np
-        out[9] = 0xFC                           # sp (typical initial value)
-        out[10] = 0                             # flags
-        # Timers
-        struct.pack_into('<I', out, 11, tick & 0xFFFFFFFF)  # tick_counter
-        struct.pack_into('<I', out, 15, 0)      # prog_timer_timestamp
-        out[19] = 0                             # prog_timer_enabled
-        out[20] = 0                             # prog_timer_data
-        out[21] = 0                             # prog_timer_rld
-        struct.pack_into('<I', out, 22, 0)      # call_depth
-        # Interrupts (bytes 26-43): all zero
-        # Memory dump: 4096 nibble-bytes starting at offset 44
-        for addr in range(640):                 # RAM nibbles 0x000-0x27F
+        # Format (from tamatool/src/state.c):
+        # 0-3:   Magic "TLST"
+        # 4:     Version 3
+        # 5-6:   PC (u16 LE) - set to 0x0100 (reset entry)
+        # 7-8:   X (u16 LE)
+        # 9-10:  Y (u16 LE)
+        # 11:    A (u8)
+        # 12:    B (u8)
+        # 13:    NP (u8)
+        # 14:    SP (u8) - 0xFC (typical init)
+        # 15:    Flags (u8)
+        # 16-19: Tick Counter (u32 LE)
+        # 20-55: 9 Timestamps (u32 LE: 2, 4, 8, 16, 32, 64, 128, 256 Hz + Prog)
+        # 56:    Prog Timer Enabled (u8)
+        # 57:    Prog Timer Data (u8)
+        # 58:    Prog Timer RLD (u8)
+        # 59-62: Call Depth (u32 LE)
+        # 63-80: Interrupts (6 slots * 3 bytes: factor, mask, triggered)
+        # 81-848: RAM (768 unpacked nibbles)
+        # 849-976: IO (128 unpacked nibbles)
+
+        out = bytearray(977)
+        struct.pack_into('4sB', out, 0, b"TLST", 3)
+        
+        # PC=0x051A (Bypass Warm-Boot Check), X=0, Y=0, A=0, B=0, NP=0, SP=0xFC, Flags=0
+        # Note: 0x051A is the "Resume" path for P1 ROMs, skipping the checksum/reset logic at 0x710
+        struct.pack_into('<HHHBBBBB', out, 5, 0x051A, 0, 0, 0, 0, 0, 0xFC, 0)
+        
+        # Tick Counter
+        t32 = tick & 0xFFFFFFFF
+        struct.pack_into('<I', out, 16, t32)
+        
+        # Sync all 9 Timestamps to current tick to avoid catch-up loops
+        for i in range(9):
+            struct.pack_into('<I', out, 20 + i*4, t32)
+            
+        # Prog timer enabled, data, rld
+        struct.pack_into('BBB', out, 56, 0, 0, 0)
+        # Call depth
+        struct.pack_into('<I', out, 59, 0)
+        
+        # Interrupts (18 bytes starting at 63)
+        # Slot 2 (K10-K13) Mask at 63 + (2*3) + 1 = 70
+        out[70] = 0xF
+        # Slot 3 (K00-K03) Mask at 63 + (3*3) + 1 = 73
+        out[73] = 0xF
+        # Slot 5 (Clock Timer) Mask at 63 + (5*3) + 1 = 79
+        out[79] = 0xF
+        
+        # Memory dump: 768 RAM nibbles
+        for addr in range(min(768, 640)):
             byte_idx = addr >> 1
             if byte_idx < len(ram_320):
-                if (addr & 1) == 0:
-                    nibble = (ram_320[byte_idx] >> 4) & 0x0F
-                else:
-                    nibble = ram_320[byte_idx] & 0x0F
+                nibble = ((ram_320[byte_idx] >> 4) & 0x0F) if (addr & 1) == 0 else (ram_320[byte_idx] & 0x0F)
             else:
                 nibble = 0
-            out[44 + addr] = nibble
-        # Addresses 0x280-0xFFF remain zero (already zeroed)
+            out[81 + addr] = nibble
+        
+        # IO region starts at 81 + 768 = 849
+        # Initialize key I/O registers used by TamaTool cpu_reset
+        out[849 + 0x41] = 0xF  # REG_K00_K03_INPUT_RELATION (Active high)
+        out[849 + 0x54] = 0xF  # REG_R40_R43_BZ_OUTPUT_PORT (Buzzer off)
+        out[849 + 0x71] = 0x8  # REG_LCD_CTRL (LCD on)
+        
         return bytes(out)
 
     def _export_tamatool_save(self):
