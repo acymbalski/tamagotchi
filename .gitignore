@@ -7,3 +7,4 @@ captures/
 annotations.json
 tama_save.bin
 *.pyc
+.gemini/
