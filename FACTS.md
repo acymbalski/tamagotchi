@@ -53,84 +53,61 @@ Wraparound period ≈ 4,294,967,296 / 32,768 = 131,072 seconds ≈ 36.4 hours (e
 
 ---
 
-## Lifecycle Nibble (`0x05D`)
+## Evolution & Life Stages (Technical)
 
+### Life Stage ID (`0x05D`)
 | Value | Stage |
 |-------|-------|
 | 0 | Egg |
-| 1 | Baby |
-| 2 | Child |
-| 4 | Teen |
-| 9 | Adult |
+| 1 | Baby (Babytchi) |
+| 2 | Child (Marutchi) |
+| 4 | Teen (Tamatchi / Kuchitamatchi) |
+| 9 | Adult (Mametchi, Ginjirotchi, etc.) |
+| 16 (0x10) | Special (Bill / Oyajitchi) |
 
-Death transition: `9 → 1` directly (Adult → Baby). `isTamaEgg()` never fires on death.
+### Character ID within Stage (`0x050`)
+| ID | Character (at Lifecycle stage) |
+|----|-------------------------------|
+| 1  | Child (Marutchi) |
+| 2  | Teen T1 (Tamatchi) |
+| 3  | Teen T2 (Tamatchi) |
+| 4  | Teen KT1 (Kuchitamatchi) |
+| 5  | Teen KT2 (Kuchitamatchi) |
+| 15 (0xF) | All Adult / Special Characters |
 
----
+### Evolution Discovered Routines
+| ROM Addr | Function |
+|----------|----------|
+| **0x354** | **Main Evolution Logic Entry**. Checks lifecycle, mistakes, and determines next form. |
+| **0xDC6** | **Evolution Table Router**. Uses `0x50` (Char) + `11` to jump to stage-specific threshold tables. |
+| **0x35D** | **Threshold Comparison Loop**. Scans RAM `0x90` (initialized from ROM) to find the first matching tier. |
+| **0xD9E** | **Child Initialization Table**. Sets thresholds for evolution into Teen forms. |
+| **0xDA6** | **Teen T1 Initialization Table**. Sets thresholds for evolution into Adult forms. |
+| **0xDBA** | **Teen KT Initialization Table**. Sets thresholds for lower-tier Adult forms. |
+| **0x369** | **Character Commit**. Writes the selected Character ID (`0x50`) and Lifecycle ID (`0x5D`). |
+| **0x371** | **Post-Evolution Setup**. Calls `0x89E` to reset graphics, weight, and state for the new form. |
 
-## Sickness Memory Map
+### Manual Evolution Trigger
+To force evolution safely (exactly as the CPU does it):
+1.  Set **Neglect** (`0x42`) and **Mistakes** (`0x51`) to desired values.
+2.  Set **Trigger Flag** `0x5C = 5`.
+3.  The ROM will detect `0x5C == 5` on the next timer tick, run the decision tree, and call the re-initialization routines.
 
-| Address | Meaning |
-|---------|---------|
-| `0x049` | Visible sick flag (derived; ROM re-asserts from `0x06D`) |
-| `0x06D` | **Authoritative sick register** (lower nibble of byte `0x036`) |
-| `0x048` | Illness level counter (0xF = max, ~5 at cure) |
-| `0x0F3` | Death timer (counts up; medicine resets to 0) |
-
-- **Do NOT write `0x06C`** (upper nibble of same byte `0x036`) — corrupts ROM state.
-- Byte `0x036` values: `0x01` = sick, `0xC0` = cured, `0x00` = fresh baby.
-
----
-
-## CPU Initial State & Savestate Layout
-
-Confirmed from `src/cpu.c` (`cpu_reset`) and `src/cpu.h` (`cpu_state_t`).
-
-### Initial Register Values
-| Register | Value | Macro / Reference |
-|----------|-------|-------------------|
-| **PC**   | `0x0100` | `TO_PC(0, 1, 0x00)` |
-| **NP**   | `0x01`   | `TO_NP(0, 1)` |
-| **SP**   | `0x00`   | (undefined/initial) |
-| **A, B, X, Y** | `0x00` | (undefined/initial) |
-| **Flags**| `0x00`   | |
-
-### TO_PC Macro
-```c
-#define TO_PC(bank, page, step)  ((step & 0xFF) | ((page & 0xF) << 8) | ((bank & 0x1) << 12))
-```
-- **Bank 0, Page 1, Step 0** = `0x0100` (The standard ROM entry point)
-- **Bank 0, Page 0, Step 0** = `0x0000` (Incorrect for starting the game)
-
-### Savestate Layout (PC Simulator)
-The `tama_save.bin` file uses the following layout:
-1. **Magic Byte**: `0x12` (1 byte)
-2. **CPU State**: `cpu_state_t` struct (64 bytes on x64)
-3. **RAM**: 320 bytes (unpacked nibbles, 1 per byte)
-4. **Extra Data (Optional)**: `lcd_state_t` (72 bytes: 64 matrix + 8 icons)
-
-**Note**: When building a savestate manually (e.g., in `stream_viewer.py`), the `PC` must be set to `0x0100` and `NP` to `0x01` to ensure the ROM executes from the correct entry point.
+**Warning**: Manually writing to `0x50` and `0x5D` without triggering the state machine (Step 3) often leads to a "panic" state (permanent sleep) because the ROM's internal graphics and activity timers are not re-aligned to the new character.
 
 ---
 
-## Dangerous Nibble Ranges
-
-- `0x060–0x07F` — likely CPU call stack / runtime state. Writing fixed values here causes screen corruption and freeze. **Treat as read-only.**
-
----
-
-## Evolution & Care
-
-### Care Mistakes
+## Care Mistakes (Technical)
 There are two distinct types of care mistakes tracked by the ROM:
 
-1. **Neglect**
+1. **Neglect (Care Mistakes)**
    - **Address:** `0x042` (nibble)
    - **Behavior:** Increments when an Attention call triggered by **Hunger** or **Happiness** hitting zero is ignored for 15 minutes.
    - **Logic:** Incremented via saturated addition at ROM `0xFDF` (calls `0xFE8`).
 
-2. **Behavior Mistakes**
+2. **Behavior Mistakes (Discipline Mistakes)**
    - **Address:** `0x051` (nibble)
-   - **Behavior:** Increments when an Attention call triggered by **Discipline** (Tama calls but stats are not zero) is ignored.
+   - **Behavior:** Increments when an Attention call triggered by **Discipline** (false call) is ignored.
    - **Logic:** Incremented via saturated addition at ROM `0xFD1` (calls `0xFE8`).
 
 - **Limits:** Both counters are single-nibble and capped at `15` (`0xF`).

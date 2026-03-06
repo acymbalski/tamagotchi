@@ -60,23 +60,41 @@ This document provides instructions for using the Tamagotchi Investigation Lab (
 - **Attention**: `0x02D` (Bool) - *High Confidence*
 - **Sleeping**: `0x04A` (8-F range) - *Confirmed*
 - **Hunger/Happy**: `0x040`/`0x041` - *Doubted* (Scaling logic `val // 4` is likely incomplete).
+- **Evolution Trigger**: `0x05C` (Nibble) - Set to `5` to initiate evolution check.
 
 ### Major Gaps
-1.  **Character ID** (`MEM_LOC_CHARACTER`, currently `0x3FF` sentinel): A nibble encoding which specific creature this is (Mametchi, Tarakotchi, etc.). The ROM writes this during evolution. **How to find**: Collect two runs with divergent care reaching the same adult stage; annotate with specific Stage values (e.g., "Mametchi (Adult)" vs "Tarakotchi (Adult)"); run `python analyzer.py --field stage`. The nibble address that differs between the two groups is the character ID. Expected to be near the `0x040`–`0x060` cluster.
-2.  **Care Mistakes Counter** (`MEM_LOC_CARE_MISTAKES`, currently `0x3FF` sentinel): Increments each time the Tama is neglected (hunger or happiness reaches 0 and goes unattended). Primary driver of character quality on P1. **How to find**: Delta analysis — snapshot immediately before and after an observed neglect event (hunger decays to 0). The nibble(s) that incremented across that pair are candidates. Cross-validate by stacking well-cared captures vs neglected captures: the address separating the two groups cleanly is the counter.
-3.  **Evolution Trigger Flag**: The ROM likely sets a flag or reacts to the age counter crossing a threshold. If found, this can be tripped directly without touching the age counter. **How to find**: Compare captures from just before vs just after an observed evolution event — the nibble(s) that change at that boundary are evolution-related.
-4.  **Screens**: We need to find the address that identifies which menu is currently open (Main, Stats, Game, etc.).
-5.  **Hunger Scaling**: Address `0x040` is correct, but we need to determine the exact bit-thresholds for the 4 hearts.
-6.  **Angel/Death**: Identify the "Dead" flag triggered when the Tama passes away.
-
-### Lifecycle Control — Two-Layer Model
-Forcing an age-up requires both layers:
-- **Trigger**: Bump `0x054` (age) past the stage threshold — `forceAgeUp()` in babysitter does this. Press `U` in the PC sim.
-- **Outcome**: Pre-write care history (zero `MEM_LOC_CARE_MISTAKES`) before the ROM's evolution subroutine reads it, OR write character ID directly after evolution fires. Both paths are implemented in `forceAgeUp()` and `setCharacter()` in `babysitter.cpp` but are no-ops until the addresses are confirmed.
+1.  **Character ID** (`MEM_LOC_CHARACTER`, at `0x050`): Confirmed. 1=Child, 2-5=Teens, 0xF=Adults.
+2.  **Care Mistakes Counter** (`0x042` and `0x051`): Confirmed. `0x042` is Neglect, `0x051` is Discipline.
+3.  **Screens**: We need to find the address that identifies which menu is currently open (Main, Stats, Game, etc.).
+4.  **Hunger Scaling**: Address `0x040` is correct, but we need to determine the exact bit-thresholds for the 4 hearts.
+5.  **Angel/Death**: Identify the "Dead" flag triggered when the Tama passes away.
 
 ---
 
-## 5. Maintenance
+## 5. ROM Disassembly Landmarks
+
+Use these addresses when navigating the `disassembly/rom_disassembly.asm` to understand game logic.
+
+| Address | Function / Table | Description |
+|:---|:---|:---|
+| **0x354** | `EVOLVE_MAIN` | Entry point for evolution decision logic. Scans mistake counters and thresholds. |
+| **0xDC6** | `EVOLVE_ROUTER` | Jump table that selects the correct threshold table based on current `0x50` (Character). |
+| **0x35D** | `EVOLVE_SCAN_LOOP` | Generic loop that compares RAM `0x42`/`0x51` against thresholds in RAM `0x90+`. |
+| **0xD9E** | `TABLE_CHILD` | Thresholds for Child -> Teen evolution. |
+| **0xDA6** | `TABLE_TEEN_T1` | Thresholds for Teen T1 -> Adult evolution. |
+| **0xDBA** | `TABLE_TEEN_KT` | Thresholds for Teen KT -> Adult evolution. |
+| **0x369** | `EVOLVE_COMMIT` | Writes final Character (`0x50`) and Lifecycle (`0x5D`) to RAM. |
+| **0x371** | `EVOLVE_SETUP` | Calls `0x89E` to reset graphics, weight, and state for the new character. |
+| **0x89E** | `INIT_CHARACTER` | Massive routine to set up character-specific data (min weight, graphics, etc). |
+
+### Triggering Evolution via Disassembly Logic
+1.  Set mistake counters at `0x42` and `0x51`.
+2.  Set `0x5C = 5`.
+3.  The main loop (around `0x301`) checks `0x5C` and jumps to `0x34B`, which eventually enters `EVOLVE_MAIN`.
+
+---
+
+## 6. Maintenance
 After updating `memory_config.py`, click **"Rebuild Assumptions (All)"** in TIL to re-process existing captures with the new logic. Use `ninja` in `pc/build` to rebuild the C++ sim if you change any `MEM_LOC_` defines in `babysitter.h`.
 
 ---
