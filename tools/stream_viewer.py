@@ -1192,6 +1192,15 @@ class StreamViewer(QMainWindow):
         self.export_tt_btn.clicked.connect(self._export_tamatool_save)
         left_layout.addWidget(self.export_tt_btn)
 
+        self.export_sim_btn = QPushButton("Export Sim Save")
+        self.export_sim_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.export_sim_btn.setToolTip(
+            "Export current state to pc/linux/tama_save.bin or pc/windows/tama_save.bin\n"
+            "This allows you to load the state in the PC simulator."
+        )
+        self.export_sim_btn.clicked.connect(self._export_sim_save)
+        left_layout.addWidget(self.export_sim_btn)
+
         scroll = QScrollArea()
         scroll.setWidget(left_widget)
         scroll.setWidgetResizable(True)
@@ -1806,19 +1815,64 @@ class StreamViewer(QMainWindow):
 
         # Find the exe relative to project root
         project_root = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
-        exe_path = os.path.join(project_root, "pc", "build", "tamagotchi_pc.exe")
+        if sys.platform == "win32":
+            exe_path = os.path.join(project_root, "pc", "windows", "tamagotchi_pc.exe")
+        else:
+            exe_path = os.path.join(project_root, "pc", "linux", "tamagotchi_pc")
+
         if not os.path.exists(exe_path):
-            QMessageBox.warning(self, "Sim Not Found",
-                                f"Could not find:\n{exe_path}\n\nBuild the PC simulator first.")
-            return
+            # Fallback to pc/build if the platform-specific one isn't there
+            fallback = os.path.join(project_root, "pc", "build", "tamagotchi_pc.exe" if sys.platform == "win32" else "tamagotchi_pc")
+            if os.path.exists(fallback):
+                exe_path = fallback
+            else:
+                QMessageBox.warning(self, "Sim Not Found",
+                                    f"Could not find:\n{exe_path}\n\nBuild the PC simulator first.")
+                return
 
         try:
             tmp = tempfile.NamedTemporaryFile(suffix=".bin", delete=False, prefix="tama_launch_")
             tmp.write(savestate)
             tmp.close()
-            subprocess.Popen([exe_path, "--load-state", tmp.name])
+            
+            # Use start_new_session on Linux to decouple the process
+            kwargs = {}
+            if sys.platform != "win32":
+                kwargs["start_new_session"] = True
+                
+            subprocess.Popen([exe_path, "--load-state", tmp.name], **kwargs)
         except Exception as e:
             QMessageBox.warning(self, "Launch Failed", f"Error launching sim:\n{e}")
+
+    def _export_sim_save(self):
+        """Export current state to pc/linux/tama_save.bin or pc/windows/tama_save.bin."""
+        ram = self.tracker.ram
+        tick = self.current_tick
+        savestate = self._build_savestate_bytes(ram, tick)
+
+        # Append LCD frame data if available
+        seg_idx = self.tracker.current_segment_idx
+        if isinstance(self.stream, SegmentedTamStream):
+            frame = self.stream.nearest_lcd_frame(self.current_tick, seg_idx=seg_idx)
+        else:
+            frame = self.stream.nearest_lcd_frame(self.current_tick)
+        
+        if frame and len(frame[1]) >= 72:
+            savestate += frame[1][:72]
+
+        project_root = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
+        if sys.platform == "win32":
+            save_path = os.path.join(project_root, "pc", "windows", "tama_save.bin")
+        else:
+            save_path = os.path.join(project_root, "pc", "linux", "tama_save.bin")
+
+        try:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            with open(save_path, "wb") as f:
+                f.write(savestate)
+            QMessageBox.information(self, "Export Successful", f"Saved state to:\n{save_path}")
+        except Exception as e:
+            QMessageBox.warning(self, "Export Failed", f"Error saving file:\n{e}")
 
     # --- TamaTool integration ---
 
