@@ -60,7 +60,7 @@
 #define ICON_SLOT_W   (LCD_DRAW_W / ICON_NUM)   /* 36px — spread icons across LCD width */
 
 #define WIN_W         (STATS_W + MARGIN + LCD_DRAW_W + MARGIN)   /* 480 */
-#define WIN_H         320
+#define WIN_H         400
 
 /* ---- Captures directory (resolved relative to exe at runtime) ---- */
 static char g_capturesDir[MAX_PATH] = "";
@@ -442,6 +442,73 @@ static void hal_play_frequency(bool_t en) {
 }
 
 /* ---- Left stats panel ---- */
+static const char* get_current_character_name() {
+    uint8_t stage = readMemory(0x05D);
+    uint8_t char_id = readMemory(0x050);
+    if (stage == 0) return "EGG";
+    if (stage == 1) return "BABYTCHI";
+    if (stage == 2) return "MARUTCHI";
+    if (stage == 4) {
+        if (char_id == 2) return "TAMATCHI T1";
+        if (char_id == 3) return "TAMATCHI T2";
+        if (char_id == 4) return "KUCHITAMATCHI T1";
+        if (char_id == 5) return "KUCHITAMATCHI T2";
+        return "TEEN";
+    }
+    if (stage == 9) return "ADULT";
+    if (stage == 11) return "BILL/OYAJI";
+    return "???";
+}
+
+static const char* get_next_evolution_name() {
+    uint8_t stage = readMemory(0x05D);
+    uint8_t char_id = readMemory(0x050);
+    uint8_t care = readMemory(0x042); // Neglect
+    uint8_t disc = readMemory(0x051); // Behavior/Discipline mistakes
+
+    if (stage == 0) return "BABYTCHI";
+    if (stage == 1) return "MARUTCHI";
+    if (stage == 2) { // Child -> Teen
+        if (care <= 2) {
+            if (disc <= 2) return "TAMATCHI T1";
+            return "TAMATCHI T2";
+        } else {
+            if (disc <= 2) return "KUCHITAMATCHI T1";
+            return "KUCHITAMATCHI T2";
+        }
+    }
+    if (stage == 4) { // Teen -> Adult
+        if (char_id == 2) { // Tamatchi T1
+            if (care <= 2) {
+                if (disc == 0) return "MAMETCHI";
+                if (disc == 1) return "GINJIROTCHI";
+                return "MASKUTCHI";
+            } else {
+                if (disc <= 1) return "KUCHIPATCHI";
+                if (disc <= 3) return "NYOROTCHI";
+                return "TARAKOTCHI";
+            }
+        }
+        if (char_id == 3) { // Tamatchi T2
+            if (care <= 3) return "MASKUTCHI";
+            if (disc <= 7) return "NYOROTCHI";
+            return "TARAKOTCHI";
+        }
+        if (char_id == 4) { // Kuchitamatchi T1
+            if (disc <= 1) return "KUCHIPATCHI";
+            if (disc == 2) return "NYOROTCHI";
+            return "TARAKOTCHI";
+        }
+        if (char_id == 5) { // Kuchitamatchi T2
+            if (disc <= 2) return "KUCHIPATCHI";
+            if (disc <= 5) return "NYOROTCHI";
+            return "TARAKOTCHI";
+        }
+    }
+    if (stage == 9) return "BILL?";
+    return "NONE";
+}
+
 static void draw_stats_panel(void) {
     /* Panel background */
     SDL_Rect bg = { 0, 0, STATS_W, WIN_H };
@@ -514,6 +581,10 @@ static void draw_stats_panel(void) {
     uint8_t neglect = readMemory(MEM_LOC_NEGLECT);
     sprintf(buf, "%d", neglect);
     STAT_ROW("NEG:", buf, neglect > 0 ? 255 : 150, neglect > 0 ? 150 : 220, neglect > 0 ? 0 : 220);
+
+    /* Character & Evolution Info */
+    STAT_ROW("CHR:", get_current_character_name(), 200, 255, 200);
+    STAT_ROW("NXT:", get_next_evolution_name(), 150, 220, 150);
 
     {
         uint8_t sec_ones = readMemory(0x10);
@@ -810,7 +881,7 @@ static int hal_handler(void) {
 
             /* Cheat: force evolution */
             case SDLK_e:
-                writeMemory(0x05C, 0x05); // Evolution trigger
+                setMemory(0x05C, 0x05); // Evolution trigger
                 printf("[cheat] Evolution triggered (0x5C=5)\n");
                 fflush(stdout);
                 break;

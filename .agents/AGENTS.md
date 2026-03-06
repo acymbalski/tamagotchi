@@ -26,9 +26,10 @@ The project is an ecosystem for Tamagotchi P1 emulation and memory analysis, spl
 
 ## Building the PC Simulator
 
-The PC simulator (`pc/build/tamagotchi_pc.exe`) is built with **MSVC + Ninja**.
+The PC simulator can be built for both Windows and Linux.
 
-### Working Build Command
+### Windows (MSVC + Ninja)
+The simulator (`pc/build/tamagotchi_pc.exe`) is built with **MSVC + Ninja**.
 To build from a shell, you must initialize the MSVC environment via a `.bat` file:
 
 ```bat
@@ -37,6 +38,14 @@ call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\
 cd /d C:\projects	amagotchi\pc\build
 "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja
 inja.exe"
+```
+
+### Linux (GCC + Make)
+The simulator (`pc/linux/tamagotchi_pc`) is built using a standard Makefile.
+
+```bash
+cd pc/linux
+make -j$(nproc)
 ```
 
 ## Discovery Routine
