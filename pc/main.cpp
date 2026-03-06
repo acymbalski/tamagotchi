@@ -4,9 +4,28 @@
  * Rendering: SDL2   Input: keyboard   Persistence: file-based savestate
  */
 
+#ifdef _WIN32
 #include <windows.h>
 #include <io.h>
 #include <fcntl.h>
+#define PATH_SEP "\\"
+#else
+#include <unistd.h>
+#include <sys/stat.h>
+#include <libgen.h>
+#include <strings.h>
+#include <poll.h>
+#include <inttypes.h>
+#ifndef MAX_PATH
+#define MAX_PATH 4096
+#endif
+#define _stricmp strcasecmp
+#define _strnicmp strncasecmp
+#define CreateDirectoryA(path, dummy) mkdir(path, 0777)
+#define GetTickCount64 SDL_GetTicks64
+#define Sleep(ms) SDL_Delay(ms)
+#define PATH_SEP "/"
+#endif
 // SDL2 VC dev zip: headers are in include/ directly (not include/SDL2/)
 #include <SDL.h>
 #include <stdint.h>
@@ -48,6 +67,7 @@ static char g_capturesDir[MAX_PATH] = "";
 
 static void init_captures_dir() {
     char exePath[MAX_PATH];
+#ifdef _WIN32
     GetModuleFileNameA(NULL, exePath, MAX_PATH);
     // Strip filename to get directory: "...\pc\build\tamagotchi_pc.exe" -> "...\pc\build\"
     char *lastSlash = strrchr(exePath, '\\');
@@ -60,6 +80,26 @@ static void init_captures_dir() {
     GetFullPathNameA(g_capturesDir, MAX_PATH, resolved, NULL);
     strncpy(g_capturesDir, resolved, MAX_PATH);
     g_capturesDir[MAX_PATH - 1] = '\0';
+#else
+    ssize_t len = readlink("/proc/self/exe", exePath, sizeof(exePath) - 1);
+    if (len != -1) {
+        exePath[len] = '\0';
+        char* dir = dirname(exePath);
+        // Assuming build is in pc/build/, we want root/captures
+        snprintf(g_capturesDir, MAX_PATH, "%s/../../captures", dir);
+        char resolved[MAX_PATH];
+        if (realpath(g_capturesDir, resolved)) {
+            strncpy(g_capturesDir, resolved, MAX_PATH);
+            g_capturesDir[MAX_PATH - 1] = '\0';
+        } else {
+            // Fallback if realpath fails
+            strncpy(g_capturesDir, "captures", MAX_PATH);
+        }
+    } else {
+        strncpy(g_capturesDir, "captures", MAX_PATH);
+    }
+#endif
+    printf("Captures directory: %s\n", g_capturesDir);
 }
 
 // Convenience macro — use g_capturesDir everywhere instead of a literal
@@ -211,7 +251,7 @@ static void draw_string_small(int x, int y, const char *s, uint8_t r, uint8_t g,
     }
 }
 
-static LARGE_INTEGER qpc_freq;
+static uint64_t qpc_freq;
 static uint64_t lastSaveMs = 0;
 static bool exitRequested = false;
 
@@ -326,12 +366,12 @@ static void take_snapshot() {
     // Ensure captures directory exists
     CreateDirectoryA(CAPTURES_DIR, NULL);
 
-    snprintf(binPath, MAX_PATH, "%s\\snap_%llu.bin", CAPTURES_DIR, ts);
-    snprintf(bmpPath, MAX_PATH, "%s\\snap_%llu.bmp", CAPTURES_DIR, ts);
+    snprintf(binPath, MAX_PATH, "%s" PATH_SEP "snap_%" PRIu64 ".bin", CAPTURES_DIR, ts);
+    snprintf(bmpPath, MAX_PATH, "%s" PATH_SEP "snap_%" PRIu64 ".bmp", CAPTURES_DIR, ts);
 
     pc_save_state_to_file(&cpuState, binPath);
     save_bmp(bmpPath);
-    printf("[investigation] Snapshot taken: %llu\n", ts);
+    printf("[investigation] Snapshot taken: %" PRIu64 "\n", ts);
     fflush(stdout);
 }
 
@@ -355,9 +395,7 @@ static void hal_log(log_level_t level, char *buff, ...) {
 }
 
 static timestamp_t hal_get_timestamp(void) {
-    LARGE_INTEGER count;
-    QueryPerformanceCounter(&count);
-    return (timestamp_t)((count.QuadPart * 1000000ULL) / (uint64_t)qpc_freq.QuadPart);
+    return (timestamp_t)((SDL_GetPerformanceCounter() * 1000000ULL) / qpc_freq);
 }
 
 static void hal_sleep_until(timestamp_t ts) {
@@ -814,11 +852,11 @@ static int hal_handler(void) {
                 } else {
                     CreateDirectoryA(CAPTURES_DIR, NULL);
                     char streamsDir[MAX_PATH];
-                    snprintf(streamsDir, MAX_PATH, "%s\\streams", CAPTURES_DIR);
+                    snprintf(streamsDir, MAX_PATH, "%s" PATH_SEP "streams", CAPTURES_DIR);
                     CreateDirectoryA(streamsDir, NULL);
                     cpu_get_state(&cpuState);
                     char streamDir[MAX_PATH];
-                    snprintf(streamDir, MAX_PATH, "%s\\streams\\stream_%u", CAPTURES_DIR, cpuState.tick_counter);
+                    snprintf(streamDir, MAX_PATH, "%s" PATH_SEP "streams" PATH_SEP "stream_%u", CAPTURES_DIR, cpuState.tick_counter);
                     g_streamCapture = new StreamCapture();
                     g_streamCapture->startSegmented(streamDir, cpuState.tick_counter, cpuState.memory);
                     lastStreamSnapshotTick = cpuState.tick_counter;
@@ -910,11 +948,16 @@ static void print_status() {
 }
 
 static void process_headless_stdin() {
+#ifdef _WIN32
     // Non-blocking check for stdin input on Windows
     HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
     DWORD avail = 0;
     if (!PeekNamedPipe(hStdin, NULL, 0, NULL, &avail, NULL) || avail == 0)
         return;
+#else
+    struct pollfd pfd = { STDIN_FILENO, POLLIN, 0 };
+    if (poll(&pfd, 1, 0) <= 0) return;
+#endif
 
     char line[1024];
     if (!fgets(line, sizeof(line), stdin))
@@ -969,7 +1012,7 @@ static void process_headless_stdin() {
  * main
  * ====================================================== */
 int main(int argc, char **argv) {
-    QueryPerformanceFrequency(&qpc_freq);
+    qpc_freq = SDL_GetPerformanceFrequency();
     init_captures_dir();
 
     /* Parse Arguments */
@@ -1074,11 +1117,11 @@ int main(int argc, char **argv) {
     if (autoStream) {
         CreateDirectoryA(CAPTURES_DIR, NULL);
         char autoStreamsDir[MAX_PATH];
-        snprintf(autoStreamsDir, MAX_PATH, "%s\\streams", CAPTURES_DIR);
+        snprintf(autoStreamsDir, MAX_PATH, "%s" PATH_SEP "streams", CAPTURES_DIR);
         CreateDirectoryA(autoStreamsDir, NULL);
         cpu_get_state(&cpuState);
         static char autoStreamDir[MAX_PATH];
-        snprintf(autoStreamDir, MAX_PATH, "%s\\streams\\stream_%u", CAPTURES_DIR, cpuState.tick_counter);
+        snprintf(autoStreamDir, MAX_PATH, "%s" PATH_SEP "streams" PATH_SEP "stream_%u", CAPTURES_DIR, cpuState.tick_counter);
         g_streamCapture = new StreamCapture();
         g_streamCapture->startSegmented(autoStreamDir, cpuState.tick_counter, cpuState.memory);
         lastStreamSnapshotTick = cpuState.tick_counter;

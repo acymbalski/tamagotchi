@@ -10,12 +10,18 @@
 #include <stdarg.h>
 #include <stdlib.h>
 
-/* ---- Windows platform headers ---- */
+/* ---- Platform-specific includes ---- */
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX  /* prevent windows.h from defining min/max macros */
 #endif
 #include <windows.h>
+#else
+#include <time.h>
+#include <unistd.h>
+#ifndef MAX_PATH
+#define MAX_PATH 4096
+#endif
 #endif
 
 /* ---- PROGMEM / pgmspace shims ---- */
@@ -34,19 +40,25 @@ static inline uint64_t millis(void) {
 #ifdef _WIN32
     return (uint64_t)GetTickCount64();
 #else
-    return 0;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
 #endif
 }
 
 static inline void delay(unsigned long ms) {
 #ifdef _WIN32
     Sleep(ms);
+#else
+    usleep(ms * 1000);
 #endif
 }
 
 static inline void delayMicroseconds(unsigned long us) {
 #ifdef _WIN32
     Sleep(us / 1000 > 0 ? (DWORD)(us / 1000) : 1);
+#else
+    usleep(us);
 #endif
 }
 

@@ -74,6 +74,7 @@ class SegmentInfo:
     """Metadata for a single segment file. Loaded eagerly; stream data loaded lazily."""
     index: int
     filename: str
+    file_index: int = 0
     version: int = 1
     start_tick: int = 0
     end_tick: int = 0
@@ -544,11 +545,27 @@ class SegmentedTamStream:
     read_snapshot_at() abstraction.
     """
 
-    def __init__(self, dirpath, progress_callback=None, bookmark_ticks=None):
+    def __init__(self, dirpath, progress_callback=None, bookmark_ticks=None, start_seg=None, end_seg=None):
         self.dirpath = dirpath
         self.filepath = dirpath  # viewer compatibility
 
         seg_files = sorted(_glob.glob(os.path.join(dirpath, "seg_*.tamstream")))
+
+        # Filter by segment number if requested
+        if start_seg is not None or end_seg is not None:
+            filtered = []
+            import re
+            for f in seg_files:
+                match = re.search(r'seg_(\d+)', os.path.basename(f))
+                if match:
+                    num = int(match.group(1))
+                    if start_seg is not None and num < start_seg:
+                        continue
+                    if end_seg is not None and num > end_seg:
+                        continue
+                filtered.append(f)
+            seg_files = filtered
+
         if not seg_files:
             raise ValueError(f"No segments found in: {dirpath}")
 
@@ -692,7 +709,11 @@ class SegmentedTamStream:
         (no decompression). Annotations, buttons, and lcd_change_ticks are populated
         lazily when the segment is fully loaded via load_segment().
         """
-        info = SegmentInfo(index=index, filename=path)
+        import re
+        match = re.search(r'seg_(\d+)', os.path.basename(path))
+        file_index = int(match.group(1)) if match else index
+        
+        info = SegmentInfo(index=index, filename=path, file_index=file_index)
         info.compressed_size = os.path.getsize(path)
 
         with open(path, 'rb') as f:
@@ -1037,7 +1058,7 @@ class SegmentedTamStream:
         self.close()
 
 
-def open_stream(path, progress_callback=None, bookmark_ticks=None):
+def open_stream(path, progress_callback=None, bookmark_ticks=None, start_seg=None, end_seg=None):
     """Open a .tamstream file or a segment directory.
 
     Returns a TamStream for single files, SegmentedTamStream for directories.
@@ -1045,7 +1066,8 @@ def open_stream(path, progress_callback=None, bookmark_ticks=None):
     """
     if os.path.isdir(path):
         return SegmentedTamStream(path, progress_callback=progress_callback,
-                                  bookmark_ticks=bookmark_ticks)
+                                  bookmark_ticks=bookmark_ticks,
+                                  start_seg=start_seg, end_seg=end_seg)
     return TamStream(path, progress_callback=progress_callback)
 
 

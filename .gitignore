@@ -2,9 +2,12 @@
 .vscode
 src/wifi_config.h
 pc/build/
+pc/linux/
 .claude/
 captures/
 annotations.json
 tama_save.bin
 *.pyc
 .gemini/
+venv/
+tools/viewer_settings.json

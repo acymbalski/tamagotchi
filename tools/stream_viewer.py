@@ -52,6 +52,7 @@ FIELD_COLORS = {
     "character":     QColor(255, 150, 200),
     "behavior_mistake": QColor(255, 50, 50),
     "neglect":       QColor(255, 150, 0),
+    "clock":         QColor(200, 200, 255),
 }
 
 def _build_addr_color_map():
@@ -65,6 +66,10 @@ def _build_addr_color_map():
         result[addr] = (name, color)
         if cfg.get("type") == "bcd":
             result[addr + 1] = (name, color)
+        elif cfg.get("type") == "clock_logic":
+            # Clock spans 6 nibbles (sec_ones/tens, min_ones/tens, h_ones/tens)
+            for i in range(1, 6):
+                result[addr + i] = (name, color)
     return result
 
 ADDR_COLOR_MAP = _build_addr_color_map()
@@ -224,28 +229,27 @@ class MemoryGridWidget(QWidget):
         self._addr_w = 48
         self._selected_addrs: set[int] = set()
         self._drag_start_addr: int | None = None
+        self._pre_drag_selection: set[int] = set()
         self._dragging = False
-        self._addr_color_cache = self._build_addr_color_map()
         self._update_size()
         self.setMouseTracking(True)
         self.setStyleSheet("QToolTip { background-color: white; color: black; border: 1px solid #999; padding: 4px; }")
 
-    def _build_addr_color_map(self):
-        """Build {nibble_addr: (field_name, QColor)} from current memory_config.MAP."""
-        result = {}
-        for name, cfg in memory_config.MAP.items():
-            addr = cfg.get("addr")
-            if addr is None:
-                continue
-            color = FIELD_COLORS.get(name, QColor(120, 120, 120))
-            result[addr] = (name, color)
-            if cfg.get("type") == "bcd":
-                result[addr + 1] = (name, color)
-        return result
-
     def _update_size(self):
-        # header + data rows + legend (2 lines)
-        total_h = self._cell_h * (self._num_rows + 1) + 4 + 36
+        # header + data rows
+        grid_h = self._cell_h * (self._num_rows + 1) + 4
+        
+        # Legend height calculation
+        fm = QFontMetrics(self._font)
+        known_fields = [n for n, cfg in memory_config.MAP.items() if cfg.get("addr") is not None]
+        
+        # We'll use 4 columns for legend items to keep it aligned
+        col_w = 120
+        cols = 4
+        rows = (len(known_fields) + cols - 1) // cols
+        
+        legend_h = (rows + 1) * self._cell_h + 20
+        total_h = grid_h + legend_h
         total_w = self._addr_w + self.COLS * self._cell_w + 8
         self.setMinimumSize(total_w, total_h)
         self.setFixedHeight(total_h)
@@ -273,6 +277,17 @@ class MemoryGridWidget(QWidget):
     def show_default(self):
         self._start_addr = 0x020
         self.set_visible_rows(self.COMPACT_ROWS)
+
+    def select_diffed(self):
+        """Add all currently diffed (yellow) addresses to selection."""
+        self._selected_addrs.update(self._diff.keys())
+        self.update()
+
+    def subtract_diffed(self):
+        """Remove all currently diffed (yellow) addresses from selection."""
+        for addr in self._diff.keys():
+            self._selected_addrs.discard(addr)
+        self.update()
 
     @property
     def visible_rows(self):
@@ -325,12 +340,15 @@ class MemoryGridWidget(QWidget):
             addr = self._addr_at_pos(int(event.position().x()), int(event.position().y()))
             self._drag_start_addr = addr
             self._dragging = False
+            self._pre_drag_selection = set(self._selected_addrs)
             if addr is not None:
                 # Every click toggles the address
                 if addr in self._selected_addrs:
                     self._selected_addrs.discard(addr)
+                    self._pre_drag_selection.discard(addr)
                 else:
                     self._selected_addrs.add(addr)
+                    self._pre_drag_selection.add(addr)
                 self.update()
 
     def mouseMoveEvent(self, event):
@@ -338,7 +356,8 @@ class MemoryGridWidget(QWidget):
             addr = self._addr_at_pos(int(event.position().x()), int(event.position().y()))
             if addr is not None and addr != self._drag_start_addr:
                 self._dragging = True
-                self._selected_addrs = self._addr_range(self._drag_start_addr, addr)
+                # Additive drag: combine pre-drag selection with current rectangular range
+                self._selected_addrs = self._pre_drag_selection | self._addr_range(self._drag_start_addr, addr)
                 self.update()
             return
 
@@ -429,21 +448,24 @@ class MemoryGridWidget(QWidget):
                                  Qt.AlignmentFlag.AlignCenter, f"{nibble_val:X}")
 
         # Legend
-        y_legend = (self._num_rows + 1) * self._cell_h + 4
-        lx = 4
-        known_fields = [n for n, cfg in memory_config.MAP.items() if cfg.get("addr") is not None]
-        for name in known_fields:
+        y_legend = (self._num_rows + 1) * self._cell_h + 10
+        painter.setPen(QColor(100, 100, 100))
+        painter.drawLine(4, y_legend - 4, self.width() - 4, y_legend - 4)
+
+        known_fields = sorted([n for n, cfg in memory_config.MAP.items() if cfg.get("addr") is not None])
+        col_w = 120
+        for i, name in enumerate(known_fields):
+            col = i % 4
+            row = i // 4
+            lx = 10 + col * col_w
+            ly = y_legend + row * self._cell_h
+            
             color = FIELD_COLORS.get(name, QColor(120, 120, 120))
-            painter.fillRect(lx, y_legend + 3, 8, 8, color)
-            lx += 10
-            painter.setPen(QColor(160, 160, 160))
-            tw = fm.horizontalAdvance(name) + 6
-            painter.drawText(lx, y_legend, tw, self._cell_h,
+            painter.fillRect(lx, ly + 3, 10, 10, color)
+            
+            painter.setPen(QColor(180, 180, 180))
+            painter.drawText(lx + 15, ly, col_w - 20, self._cell_h,
                              Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, name)
-            lx += tw
-            if lx > self.width() - 80:
-                lx = 4
-                y_legend += self._cell_h
 
         painter.end()
 
@@ -566,8 +588,9 @@ class TimelineWidget(QWidget):
 
     def update_segment_loaded(self, index, loaded):
         if 0 <= index < len(self._segments):
-            s, e, _ = self._segments[index]
-            self._segments[index] = (s, e, loaded)
+            # _segments entries are (start_tick, end_tick, loaded, file_index)
+            s, e, _, f_idx = self._segments[index]
+            self._segments[index] = (s, e, loaded, f_idx)
             self.update()
 
     def tick_from_x(self, x):
@@ -578,7 +601,7 @@ class TimelineWidget(QWidget):
 
     def _seg_index_at_tick(self, tick):
         """Return segment index whose range contains tick, or None."""
-        for i, (s, e, _loaded) in enumerate(self._segments):
+        for i, (s, e, _loaded, _f_idx) in enumerate(self._segments):
             if s <= tick <= e:
                 return i
         return None
@@ -625,16 +648,24 @@ class TimelineWidget(QWidget):
             return
         tick = self.tick_from_x(event.pos().x())
         seg_idx = self._seg_index_at_tick(tick)
-        if seg_idx is None:
-            return
-        _s, _e, is_loaded = self._segments[seg_idx]
+        
         menu = QMenu(self)
-        if is_loaded:
-            action = menu.addAction(f"Unload segment {seg_idx}")
-            action.triggered.connect(lambda: self._on_unload_segment and self._on_unload_segment(seg_idx))
-        else:
-            action = menu.addAction(f"Load segment {seg_idx}")
-            action.triggered.connect(lambda: self._on_load_segment and self._on_load_segment(seg_idx))
+        if seg_idx is not None:
+            # _segments entries are (start_tick, end_tick, loaded, file_index)
+            _, _, is_loaded, file_idx = self._segments[seg_idx]
+            if is_loaded:
+                action = menu.addAction(f"Unload segment {file_idx}")
+                action.triggered.connect(lambda: self._on_unload_segment and self._on_unload_segment(seg_idx))
+            else:
+                action = menu.addAction(f"Load segment {file_idx}")
+                action.triggered.connect(lambda: self._on_load_segment and self._on_load_segment(seg_idx))
+            menu.addSeparator()
+            
+        unloaded_count = sum(1 for seg in self._segments if not seg[2])
+        if unloaded_count > 0:
+            action_all = menu.addAction(f"Load all segments ({unloaded_count} remaining)")
+            action_all.triggered.connect(lambda: self._on_load_all_segments and self._on_load_all_segments())
+        
         menu.exec(event.globalPos())
 
     def paintEvent(self, event):
@@ -649,7 +680,7 @@ class TimelineWidget(QWidget):
             return
 
         # --- 1. Segment rectangles ---
-        for start_t, end_t, is_loaded in self._segments:
+        for start_t, end_t, is_loaded, _ in self._segments:
             x0 = int((start_t - self.min_tick) / span * w)
             x1 = int((end_t - self.min_tick) / span * w)
             seg_w = max(1, x1 - x0)
@@ -661,7 +692,7 @@ class TimelineWidget(QWidget):
         # --- 2. Segment boundary lines ---
         if self._segments:
             painter.setPen(QPen(QColor(80, 80, 80), 1))
-            for start_t, end_t, _ in self._segments:
+            for start_t, end_t, _, _ in self._segments:
                 for t in (start_t, end_t):
                     x = int((t - self.min_tick) / span * w)
                     painter.drawLine(x, 0, x, h)
@@ -753,8 +784,8 @@ class HelpOverlay(QWidget):
     Alt+Left / Right     Prev/Next write to selected addrs
 
   Hex Grid
-    Click                Select address
-    Drag                 Select rectangular region
+    Click                Select address (toggles)
+    Drag                 Select rectangular region (additive)
     Hover                Show address, field name, value
     Red-bordered cells = danger zone (CPU stack)
 
@@ -923,7 +954,7 @@ class NavigationBar(QWidget):
             f"Diff: {diff_count}",
         ]
         if segment_index is not None and total_segments is not None:
-            parts.append(f"Seg: {segment_index}/{total_segments-1} ({loaded_count} loaded)")
+            parts.append(f"Seg: {segment_index} ({loaded_count}/{total_segments} loaded)")
         if memory_mb is not None:
             parts.append(f"Mem: {memory_mb:.0f}MB")
         self.status_label.setText(" | ".join(parts))
@@ -950,12 +981,36 @@ class SegmentLoadWorker(QThread):
         self.finished.emit(self._segment_index)
 
 
+class BatchSegmentLoadWorker(QThread):
+    """Background thread to load multiple segments."""
+    finished = pyqtSignal()
+    progress = pyqtSignal(int, str)
+
+    def __init__(self, stream, segment_indices, parent=None):
+        super().__init__(parent)
+        self._stream = stream
+        self._segment_indices = segment_indices
+
+    def run(self):
+        total = len(self._segment_indices)
+        for i, seg_idx in enumerate(self._segment_indices):
+            if self._stream.is_segment_loaded(seg_idx):
+                continue
+            
+            def prog(pct, msg):
+                overall_pct = int((i / total) * 100 + (pct / total))
+                self.progress.emit(overall_pct, f"Seg {seg_idx} ({i+1}/{total}): {msg}")
+            
+            self._stream.load_segment(seg_idx, prog)
+        self.finished.emit()
+
+
 # ===========================================================================
 # StreamViewer (main window)
 # ===========================================================================
 
 class StreamViewer(QMainWindow):
-    def __init__(self, filepath, app=None):
+    def __init__(self, filepath, app=None, start_seg=None, end_seg=None):
         super().__init__()
         self.setWindowTitle(f"Stream Viewer - {os.path.basename(filepath)}")
         self.resize(1100, 750)
@@ -982,7 +1037,8 @@ class StreamViewer(QMainWindow):
 
         stream_progress(0, "Parsing stream file...")
         self.stream = open_stream(filepath, progress_callback=stream_progress,
-                                  bookmark_ticks=self.bookmark_store.ticks or None)
+                                  bookmark_ticks=self.bookmark_store.ticks or None,
+                                  start_seg=start_seg, end_seg=end_seg)
 
         stream_progress(50, "Building write index...")
         self.tracker = CachedStateTracker(self.stream, progress_callback=stream_progress)
@@ -1077,11 +1133,20 @@ class StreamViewer(QMainWindow):
         self.time_label = QLabel("Time: 0.0s")
         left_layout.addWidget(self.time_label)
 
+        self.stats_labels = {}
+        # Prominent clock at the top of the stats
+        self.stats_labels["clock"] = QLabel("clock: --")
+        self.stats_labels["clock"].setStyleSheet(
+            "font-weight: bold; color: #00ff00; background-color: #000; "
+            "padding: 5px; font-size: 18px; font-family: Consolas; border: 2px solid #333;"
+        )
+        self.stats_labels["clock"].setAlignment(Qt.AlignmentFlag.AlignCenter)
+        left_layout.addWidget(self.stats_labels["clock"])
+
         # LCD in the left panel (small)
         self.lcd_widget = LcdWidget()
         left_layout.addWidget(self.lcd_widget)
 
-        self.stats_labels = {}
         stat_names = ["hunger", "happy", "discipline", "weight", "age", "sick",
                       "sleeping", "poop", "attention", "lifecycle", "character", "behavior_mistake", "neglect"]
         for name in stat_names:
@@ -1153,6 +1218,8 @@ class StreamViewer(QMainWindow):
             "- Row": "Show one fewer row of memory  [-/_]",
             "Show all": "Show all 640 nibbles  [M]",
             "Default": "Show compact 4-row view  [M]",
+            "Select Diff": "Add all currently diffed (yellow) values to selection",
+            "Sub Diff": "Remove all currently diffed (yellow) values from selection",
         }
         for text, handler in [("+ Row", self._hex_expand),
                               ("- Row", self._hex_collapse),
@@ -1165,6 +1232,17 @@ class StreamViewer(QMainWindow):
             btn.setToolTip(hex_btn_tooltips[text])
             btn.clicked.connect(handler)
             hex_header.addWidget(btn)
+
+        for text, handler in [("Select Diff", self._hex_select_diff),
+                              ("Sub Diff", self._hex_subtract_diff)]:
+            btn = QPushButton(text)
+            btn.setFixedWidth(75)
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            btn.setStyleSheet(white_btn_style)
+            btn.setToolTip(hex_btn_tooltips[text])
+            btn.clicked.connect(handler)
+            hex_header.addWidget(btn)
+
         self.btn_clear_selection = QPushButton("Clear Sel")
         self.btn_clear_selection.setFixedWidth(70)
         self.btn_clear_selection.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -1224,7 +1302,7 @@ class StreamViewer(QMainWindow):
         self.timeline_widget._lcd_popup = self._lcd_popup
         # Populate segment info for segmented streams
         if isinstance(self.stream, SegmentedTamStream):
-            segs = [(s.start_tick, s.end_tick, s.loaded) for s in self.stream.segments]
+            segs = [(s.start_tick, s.end_tick, s.loaded, s.file_index) for s in self.stream.segments]
             self.timeline_widget.set_segments(segs)
             self.timeline_widget._on_load_segment = self._on_load_segment
             self.timeline_widget._on_unload_segment = self._on_unload_segment
@@ -1256,6 +1334,8 @@ class StreamViewer(QMainWindow):
         self.nav_bar.btn_add_bookmark.clicked.connect(self._toggle_mark)
         self.nav_bar.btn_prev_bookmark.clicked.connect(lambda: self._cycle_marks(-1))
         self.nav_bar.btn_next_bookmark.clicked.connect(lambda: self._cycle_marks(1))
+
+        self.timeline_widget._on_load_all_segments = self._load_all_segments
 
         main_layout.addWidget(self.nav_bar)
 
@@ -1401,6 +1481,12 @@ class StreamViewer(QMainWindow):
     def _hex_clear_selection(self):
         self.hex_grid.clear_selection()
 
+    def _hex_select_diff(self):
+        self.hex_grid.select_diffed()
+
+    def _hex_subtract_diff(self):
+        self.hex_grid.subtract_diffed()
+
     # --- Annotation ---
 
     def _save_annotation(self):
@@ -1495,8 +1581,11 @@ class StreamViewer(QMainWindow):
             # Use tracker's cursor-based segment index (correct for wrapped ticks)
             if seg_idx is None:
                 seg_idx = self.stream.segment_for_tick(self.current_tick)
+            
+            # Use true file_index for display
+            file_idx = self.stream.segments[seg_idx].file_index
             seg_kwargs = {
-                "segment_index": seg_idx,
+                "segment_index": file_idx,
                 "loaded_count": self.stream.loaded_segment_count,
                 "total_segments": len(self.stream.segments),
                 "memory_mb": self.stream.estimated_memory_bytes / (1024 * 1024),
@@ -1567,6 +1656,40 @@ class StreamViewer(QMainWindow):
         self.stream.unload_segment(seg_index)
         self.timeline_widget.update_segment_loaded(seg_index, False)
         self._update_display()
+
+    def _load_all_segments(self):
+        """Load all unloaded segments."""
+        if not isinstance(self.stream, SegmentedTamStream):
+            return
+        
+        unloaded = [i for i, seg in enumerate(self.stream.segments) if not seg.loaded]
+        if not unloaded:
+            return
+
+        progress = QProgressDialog("Loading all segments...", "Cancel", 0, 100, self)
+        progress.setWindowTitle("Batch Loading")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+
+        worker = BatchSegmentLoadWorker(self.stream, unloaded, self)
+        
+        def on_finished():
+            progress.close()
+            # Register all newly loaded writes in tracker
+            for i in unloaded:
+                self.tracker.add_segment_writes(i)
+                self.timeline_widget.update_segment_loaded(i, True)
+            self._update_display()
+            QMessageBox.information(self, "Load Complete", f"Loaded {len(unloaded)} segments.")
+
+        worker.finished.connect(on_finished)
+        worker.progress.connect(lambda pct, msg: (progress.setValue(pct), progress.setLabelText(msg)))
+        worker.start()
+        
+        if not hasattr(self, '_segment_workers'):
+            self._segment_workers = []
+        self._segment_workers.append(worker)
 
     @staticmethod
     def _compute_ram_diff(ram_a, ram_b):
@@ -1752,60 +1875,75 @@ class StreamViewer(QMainWindow):
 
     @staticmethod
     def _build_tamatool_savestate(ram_320: bytes, tick: int) -> bytes:
-        """Build a TamaTool-compatible save state binary (4140 bytes).
-
-        Format (reverse-engineered from save0.bin):
-          Bytes  0- 1: pc        (u16 LE) — zeroed (reset-like state)
-          Bytes  2- 3: x         (u16 LE) — zeroed
-          Bytes  4- 5: y         (u16 LE) — zeroed
-          Byte   6   : a         (u8)     — zeroed
-          Byte   7   : b         (u8)     — zeroed
-          Byte   8   : np        (u8)     — zeroed
-          Byte   9   : sp        (u8)     — 0xFC (typical init)
-          Byte  10   : flags     (u8)     — zeroed
-          Bytes 11-14: tick_counter (u32 LE) — set to captured tick
-          Bytes 15-18: prog_timer_timestamp (u32 LE) — zeroed
-          Byte  19   : prog_timer_enabled (u8) — 0
-          Byte  20   : prog_timer_data    (u8) — 0
-          Byte  21   : prog_timer_rld     (u8) — 0
-          Bytes 22-25: call_depth (u32 LE) — zeroed
-          Bytes 26-43: 6 interrupt slots × 3 bytes (factor, mask, triggered) — zeroed
-          Bytes 44-4139: 4096 nibble bytes (1 nibble per byte, 0-15)
-            nibble[0x000..0x27F] = unpacked from ram_320 (640 nibbles)
-            nibble[0x280..0xFFF] = 0x00 (unused/IO region)
+        """Build a TamaTool-compatible save state binary (TLST v3 format).
+        Supports both E0C6S46 (640 nibbles) and E0C6S48 (768 nibbles) builds.
         """
         import struct
 
-        out = bytearray(4140)
-        # CPU registers
-        struct.pack_into('<H', out, 0, 0)       # pc = 0
-        struct.pack_into('<H', out, 2, 0)       # x = 0
-        struct.pack_into('<H', out, 4, 0)       # y = 0
-        out[6] = 0                              # a
-        out[7] = 0                              # b
-        out[8] = 0                              # np
-        out[9] = 0xFC                           # sp (typical initial value)
-        out[10] = 0                             # flags
-        # Timers
-        struct.pack_into('<I', out, 11, tick & 0xFFFFFFFF)  # tick_counter
-        struct.pack_into('<I', out, 15, 0)      # prog_timer_timestamp
-        out[19] = 0                             # prog_timer_enabled
-        out[20] = 0                             # prog_timer_data
-        out[21] = 0                             # prog_timer_rld
-        struct.pack_into('<I', out, 22, 0)      # call_depth
-        # Interrupts (bytes 26-43): all zero
-        # Memory dump: 4096 nibble-bytes starting at offset 44
-        for addr in range(640):                 # RAM nibbles 0x000-0x27F
+        # Format (from tamatool/src/state.c):
+        # 0-3:   Magic "TLST"
+        # 4:     Version 3
+        # 5-6:   PC (u16 LE) - set to 0x0100 (reset entry)
+        # 7-8:   X (u16 LE)
+        # 9-10:  Y (u16 LE)
+        # 11:    A (u8)
+        # 12:    B (u8)
+        # 13:    NP (u8)
+        # 14:    SP (u8) - 0xFC (typical init)
+        # 15:    Flags (u8)
+        # 16-19: Tick Counter (u32 LE)
+        # 20-55: 9 Timestamps (u32 LE: 2, 4, 8, 16, 32, 64, 128, 256 Hz + Prog)
+        # 56:    Prog Timer Enabled (u8)
+        # 57:    Prog Timer Data (u8)
+        # 58:    Prog Timer RLD (u8)
+        # 59-62: Call Depth (u32 LE)
+        # 63-80: Interrupts (6 slots * 3 bytes: factor, mask, triggered)
+        # 81-848: RAM (768 unpacked nibbles)
+        # 849-976: IO (128 unpacked nibbles)
+
+        out = bytearray(977)
+        struct.pack_into('4sB', out, 0, b"TLST", 3)
+        
+        # PC=0x051A (Bypass Warm-Boot Check), X=0, Y=0, A=0, B=0, NP=0, SP=0xFC, Flags=0
+        # Note: 0x051A is the "Resume" path for P1 ROMs, skipping the checksum/reset logic at 0x710
+        struct.pack_into('<HHHBBBBB', out, 5, 0x051A, 0, 0, 0, 0, 0, 0xFC, 0)
+        
+        # Tick Counter
+        t32 = tick & 0xFFFFFFFF
+        struct.pack_into('<I', out, 16, t32)
+        
+        # Sync all 9 Timestamps to current tick to avoid catch-up loops
+        for i in range(9):
+            struct.pack_into('<I', out, 20 + i*4, t32)
+            
+        # Prog timer enabled, data, rld
+        struct.pack_into('BBB', out, 56, 0, 0, 0)
+        # Call depth
+        struct.pack_into('<I', out, 59, 0)
+        
+        # Interrupts (18 bytes starting at 63)
+        # Slot 2 (K10-K13) Mask at 63 + (2*3) + 1 = 70
+        out[70] = 0xF
+        # Slot 3 (K00-K03) Mask at 63 + (3*3) + 1 = 73
+        out[73] = 0xF
+        # Slot 5 (Clock Timer) Mask at 63 + (5*3) + 1 = 79
+        out[79] = 0xF
+        
+        # Memory dump: 768 RAM nibbles
+        for addr in range(min(768, 640)):
             byte_idx = addr >> 1
             if byte_idx < len(ram_320):
-                if (addr & 1) == 0:
-                    nibble = (ram_320[byte_idx] >> 4) & 0x0F
-                else:
-                    nibble = ram_320[byte_idx] & 0x0F
+                nibble = ((ram_320[byte_idx] >> 4) & 0x0F) if (addr & 1) == 0 else (ram_320[byte_idx] & 0x0F)
             else:
                 nibble = 0
-            out[44 + addr] = nibble
-        # Addresses 0x280-0xFFF remain zero (already zeroed)
+            out[81 + addr] = nibble
+        
+        # IO region starts at 81 + 768 = 849
+        # Initialize key I/O registers used by TamaTool cpu_reset
+        out[849 + 0x41] = 0xF  # REG_K00_K03_INPUT_RELATION (Active high)
+        out[849 + 0x54] = 0xF  # REG_R40_R43_BZ_OUTPUT_PORT (Buzzer off)
+        out[849 + 0x71] = 0x8  # REG_LCD_CTRL (LCD on)
+        
         return bytes(out)
 
     def _export_tamatool_save(self):
@@ -1911,18 +2049,20 @@ class StreamViewer(QMainWindow):
 
 
 def main():
-    if len(sys.argv) != 2:
-        print(f"Usage: {sys.argv[0]} <tamstream_file>")
-        sys.exit(1)
+    import argparse
+    parser = argparse.ArgumentParser(description="Timeline viewer for .tamstream files")
+    parser.add_argument("filepath", help="Path to .tamstream file or segment directory")
+    parser.add_argument("--start-seg", type=int, help="Start segment number to load")
+    parser.add_argument("--end-seg", type=int, help="End segment number to load")
+    args = parser.parse_args()
 
-    filepath = sys.argv[1]
-    if not os.path.exists(filepath):
-        print(f"Error: File not found: {filepath}")
+    if not os.path.exists(args.filepath):
+        print(f"Error: File not found: {args.filepath}")
         sys.exit(1)
 
     app = QApplication(sys.argv)
     app.setStyleSheet("QToolTip { background-color: white; color: black; border: 1px solid #999; padding: 4px; }")
-    viewer = StreamViewer(filepath, app=app)
+    viewer = StreamViewer(args.filepath, app=app, start_seg=args.start_seg, end_seg=args.end_seg)
     viewer.show()
     sys.exit(app.exec())
 

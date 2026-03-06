@@ -3,7 +3,18 @@
 #include "stream_capture.h"
 #include "cpu.h"
 #include <cstring>
+
+#ifdef _WIN32
 #include <direct.h>  // _mkdir on MSVC
+#define mkdir(path, mode) _mkdir(path)
+#define PATH_SEP "\\"
+#define ftello64 _ftelli64
+#else
+#include <sys/stat.h>
+#include <sys/types.h>
+#define PATH_SEP "/"
+#define ftello64 ftello
+#endif
 
 // Globals
 StreamCapture* g_streamCapture = nullptr;
@@ -110,7 +121,7 @@ void StreamCapture::stop() {
 
     // Write on-disk TIDX index (uncompressed, after compressed data)
     if (file && !indexEntries.empty()) {
-        uint64_t indexStart = (uint64_t)_ftelli64(file);
+        uint64_t indexStart = (uint64_t)ftello64(file);
         fwrite(STREAM_INDEX_MAGIC, 1, 4, file);
         uint32_t count = (uint32_t)indexEntries.size();
         fwrite(&count, 4, 1, file);
@@ -312,14 +323,14 @@ void StreamCapture::startSegmented(const char* dirPath, uint32_t startTick, cons
     segmentIndex = 0;
     segmentStartTick = startTick;
 
-    _mkdir(baseDir);
+    mkdir(baseDir, 0777);
     openSegment(startTick, initialMemory);
     segmented = true;  // openSegment calls start() which sets segmented=false; restore it
 }
 
 void StreamCapture::openSegment(uint32_t tick, const uint8_t* memory) {
     char segPath[600];
-    snprintf(segPath, sizeof(segPath), "%s\\seg_%03u.tamstream", baseDir, segmentIndex);
+    snprintf(segPath, sizeof(segPath), "%s" PATH_SEP "seg_%03u.tamstream", baseDir, segmentIndex);
     start(segPath, tick, memory);
     // Restore segmentation state (start() clears it)
     segmented = true;
