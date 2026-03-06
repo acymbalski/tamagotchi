@@ -60,7 +60,7 @@ def get_value(mem, key):
     elif ctype == "stage_logic":
         val = decode_nibble(mem, addr)
         # Observed: 0=Egg, 1=Baby, 2=Child, 4=Teen, 9=Adult (NOT 8 — confirmed from captures)
-        mapping = {0: "Egg", 1: "Baby", 2: "Child", 4: "Teen", 9: "Adult", 16: "Special"}
+        mapping = {0: "Egg", 1: "Baby", 2: "Child", 4: "Teen", 9: "Adult", 11: "Special"}
         return mapping.get(val, "Unknown")
     elif ctype == "clock_logic":
         # addr 0x10/0x11 = sec ones/tens

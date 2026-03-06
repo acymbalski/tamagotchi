@@ -808,6 +808,13 @@ static int hal_handler(void) {
                 perform_reset();
                 break;
 
+            /* Cheat: force evolution */
+            case SDLK_e:
+                writeMemory(0x05C, 0x05); // Evolution trigger
+                printf("[cheat] Evolution triggered (0x5C=5)\n");
+                fflush(stdout);
+                break;
+
             /* Cheat: force age-up (bumps age counter; zeros care_mistakes once addr known) */
             case SDLK_u:
                 forceAgeUp();

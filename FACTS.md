@@ -56,6 +56,8 @@ Wraparound period ≈ 4,294,967,296 / 32,768 = 131,072 seconds ≈ 36.4 hours (e
 ## Evolution & Life Stages (Technical)
 
 ### Life Stage ID (`0x05D`)
+*Note: As this is a 4-bit CPU, these values are stored in a single nibble (0-15).*
+
 | Value | Stage |
 |-------|-------|
 | 0 | Egg |
@@ -63,7 +65,7 @@ Wraparound period ≈ 4,294,967,296 / 32,768 = 131,072 seconds ≈ 36.4 hours (e
 | 2 | Child (Marutchi) |
 | 4 | Teen (Tamatchi / Kuchitamatchi) |
 | 9 | Adult (Mametchi, Ginjirotchi, etc.) |
-| 16 (0x10) | Special (Bill / Oyajitchi) |
+| 11 (0x0B) | Special (Bill / Oyajitchi) |
 
 ### Character ID within Stage (`0x050`)
 | ID | Character (at Lifecycle stage) |
